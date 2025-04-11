@@ -24,11 +24,16 @@ pub enum ParserError<'a> {
 pub struct Parser<'a> {
     input: Vec<Token<'a>>,
     cursor: usize,
+    collapse: usize,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(input: Vec<Token<'a>>) -> Self {
-        Self { input, cursor: 0 }
+        Self {
+            input,
+            cursor: 0,
+            collapse: 0,
+        }
     }
 
     pub fn parse(&mut self) -> Result<'a, HashMap<&'a str, HuonValue<'a>>> {
@@ -42,6 +47,10 @@ impl<'a> Parser<'a> {
         let mut map = HashMap::new();
 
         while let Ok(token) = self.peek() {
+            if self.collapse > 0 {
+                self.collapse -= 1;
+                return Ok(map);
+            }
             let mut had_whitespace_check = false;
             // Check if this line is at the expected indentation
             if let Token::WhiteSpace(n) = token {
@@ -69,6 +78,7 @@ impl<'a> Parser<'a> {
                 if let (Token::Identifier(_), true, false) =
                     (self.peek()?, expected_indent > 0, had_whitespace_check)
                 {
+                    self.collapse = expected_indent - 1;
                     return Ok(map);
                 }
             }

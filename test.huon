@@ -3,6 +3,10 @@ age: 69
 address:
     house: "Abyss"
     city:
-        name: "Ingland"
+        name: "DEUTSCHLAND"
         postal: 69420
 adult: true
+family:
+    dad: "Horst"
+    mom: "Frieren"
+combined_family_age: 69
