@@ -40,6 +40,24 @@ impl<'a> Parser<'a> {
         self.parse_object(0)
     }
 
+    /// A helper func to check if a token is whitespace with the expected indentation.
+    /// If found, it consumes the token and returns true.
+    /// Otherwise, it returns false, or an error if the indentation is greater.
+    fn check_indentation(&mut self, token: Token<'a>, expected_indent: usize) -> Result<'a, bool> {
+        if let Token::WhiteSpace(n) = token {
+            let indent = n / 4;
+            match indent.cmp(&expected_indent) {
+                Ordering::Less => return Ok(false),
+                Ordering::Greater => return Err(ParserError::InvalidToken(token)),
+                Ordering::Equal => {
+                    self.advance()?;
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     fn parse_object(
         &mut self,
         expected_indent: usize,
@@ -47,82 +65,56 @@ impl<'a> Parser<'a> {
         let mut map = HashMap::new();
 
         while let Ok(token) = self.peek() {
+            // this is to "notify" recursive calls that they should return and
+            // dedent 1 level
             if self.collapse > 0 {
                 self.collapse -= 1;
                 return Ok(map);
             }
-            let mut had_whitespace_check = false;
-            // Check if this line is at the expected indentation
-            if let Token::WhiteSpace(n) = token {
-                let indent = n / 4;
-                match indent.cmp(&expected_indent) {
-                    Ordering::Less => {
-                        // We have dedented: end of this nested object.
-                        return Ok(map);
-                    }
-                    Ordering::Greater => {
-                        return Err(ParserError::InvalidToken(token));
-                    }
-                    Ordering::Equal => {
-                        // Indentation matches expected, so consume it.
-                        self.advance()?;
-                    }
-                }
-                had_whitespace_check = true;
-            }
 
+            // First check the line's starting whitespace.
+            let had_whitespace_check = self.check_indentation(token, expected_indent)?;
+
+            // If the token is a NewLine, consume it and check for a dedented identifier.
             if let Token::NewLine = token {
-                // Consume the newline and continue to the next line.
-                self.advance()?;
+                self.advance()?; // consume the newline
 
+                // Check if the following token indicates an identifier with a dedented (or no) preceding whitespace.
+                // This implements your special "collapse" behavior.
                 if let (Token::Identifier(_), true, false) =
                     (self.peek()?, expected_indent > 0, had_whitespace_check)
                 {
+                    // we subtract 1 because we will do the first return immediately
                     self.collapse = expected_indent - 1;
                     return Ok(map);
                 }
             }
 
-            // Check if this line is at the expected indentation
-            if let Token::WhiteSpace(n) = self.peek()? {
-                let indent = n / 4;
-                match indent.cmp(&expected_indent) {
-                    Ordering::Less => {
-                        // We have dedented: end of this nested object.
-                        return Ok(map);
-                    }
-                    Ordering::Greater => {
-                        return Err(ParserError::InvalidToken(token));
-                    }
-                    Ordering::Equal => {
-                        // Indentation matches expected, so consume it.
-                        self.advance()?;
-                    }
-                }
-            }
+            // Check indentation again before attempting to parse a key.
+            let next_token = self.peek()?;
+            self.check_indentation(next_token, expected_indent)?;
 
-            // Now, expect an identifier.
+            // Expect an identifier key.
             let key = match self.advance()? {
                 Token::Identifier(s) => s,
                 token => return Err(ParserError::InvalidToken(token)),
             };
 
-            // Here we check if the value is inline or nested.
+            // Now decide whether the value is inline or a nested block.
             let value = match self.peek()? {
-                // Inline value: may be introduced by a separator (or a single space).
+                // Inline value: indicated by a single whitespace.
                 Token::WhiteSpace(1) => {
                     self.advance()?; // consume the inline whitespace
-                    self.parse_value()? // parse the literal value
+                    self.parse_value()?
                 }
-                // Nested object: line break indicates new block
+                // Nested object: indicated by a newline.
                 Token::NewLine => {
-                    self.advance()?; // consume newline
-                    // The next token must be indentation strictly greater than current expected_indent.
+                    self.advance()?; // consume the newline
+                    // The next token must be whitespace with an indentation strictly greater than expected.
                     match self.peek()? {
                         Token::WhiteSpace(n) if (n / 4) > expected_indent => {
-                            // Consume the indentation and then recursively parse.
-                            self.advance()?;
-                            HuonValue::Object(self.parse_object(n / 4)?) // wrap the resulting map into a HuonValue::Object(...)
+                            self.advance()?; // consume the nested whitespace
+                            HuonValue::Object(self.parse_object(n / 4)?)
                         }
                         token => return Err(ParserError::InvalidToken(token)),
                     }
@@ -130,7 +122,6 @@ impl<'a> Parser<'a> {
                 token => return Err(ParserError::InvalidToken(token)),
             };
 
-            // Insert into the map.
             map.insert(key, value);
         }
         Ok(map)
