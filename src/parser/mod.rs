@@ -4,7 +4,6 @@ use {
     value::HuonValue,
 };
 
-pub mod indentation;
 pub mod value;
 
 type Result<'a, T> = std::result::Result<T, ParserError<'a>>;
