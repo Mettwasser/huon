@@ -1,12 +1,12 @@
-name: "Dad"
-age: 69
+name: "John"
+age: 23
 address:
     house: "Abyss"
     city:
-        name: "DEUTSCHLAND"
-        postal: 69420
-adult: true
+        name: "Underworld"
+        postal: 66666
+john_is_adult: true
 family:
-    dad: "Horst"
-    mom: "Frieren"
-combined_family_age: 69
+    dad: "Devil 2"
+    mom: "Devil 1"
+combined_family_age: 398
