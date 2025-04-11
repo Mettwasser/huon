@@ -1,0 +1,8 @@
+name: "Dad"
+age: 69
+address:
+    house: "Abyss"
+    city:
+        name: "Ingland"
+        postal: 69420
+adult: true
