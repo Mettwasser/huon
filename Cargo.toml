@@ -3,8 +3,6 @@ name = "huon"
 version = "0.1.0"
 edition = "2024"
 
-# a test
-
 [dependencies]
 serde = { version = "1.0.219", features = ["derive"] }
 thiserror = "2.0.12"
