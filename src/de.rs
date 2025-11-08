@@ -24,9 +24,7 @@ impl<'de> Deserializer<'de> for HuonDeserializer<'de> {
         match self.value {
             HuonValue::Boolean(b) => visitor.visit_bool(b),
             HuonValue::Int(i) => visitor.visit_i64(i),
-            // `s` is `&'de str`, `visit_borrowed_str` expects `&'de str`. This is correct.
             HuonValue::String(s) => visitor.visit_borrowed_str(s),
-            // `map` is `&'de ValueMap<'de>`.
             HuonValue::Object(map) => visitor.visit_map(MapDeserializer::new(map)),
         }
     }
