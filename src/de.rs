@@ -1,143 +1,254 @@
-// use {
-//     crate::{
-//         Error, Result,
-//         tokenizer::{Tokenizer, TokenizerError, token::Token},
-//     },
-//     serde::{de, forward_to_deserialize_any},
-//     std::{result::Result as StdResult, str::FromStr},
-// };
+use std::collections::hash_map;
 
-// pub struct Deserializer<'a, 'de> {
-//     tokens: &'a [Token<'de>],
-//     cursor: usize,
-//     is_root: bool,
-//     indentation_level: usize,
-// }
+use crate::{
+    parser::{Parser, ValueMap, value::HuonValue},
+    tokenizer::Tokenizer,
+};
+use serde::{
+    Deserialize, Deserializer,
+    de::{self, Visitor},
+    forward_to_deserialize_any,
+};
 
-// impl<'de> Deserializer<'_, 'de> {
-//     fn peek(&mut self) -> Result<'de, Token<'de>> {
-//         self.tokens
-//             .get(self.cursor)
-//             .cloned()
-//             .ok_or(TokenizerError::EOF.into())
-//     }
+pub struct HuonDeserializer<'de> {
+    value: HuonValue<'de>,
+}
 
-//     fn advance(&mut self) -> Result<'de, Token<'de>> {
-//         let token = self.peek()?;
-//         self.cursor += 1;
-//         Ok(token)
-//     }
+impl<'de> Deserializer<'de> for HuonDeserializer<'de> {
+    type Error = serde::de::value::Error;
 
-//     /// Advances to the next symbol
-//     fn advance_to_symbol(&mut self) -> Result<'de, Token<'de>> {
-//         loop {
-//             let token = self.advance()?;
-//             match token {
-//                 Token::WhiteSpace(n) if n % 4 == 0 => {
-//                     self.indentation_level = n / 4;
-//                     continue;
-//                 }
-//                 Token::NewLine => {
-//                     if let Token::WhiteSpace(n) = self.peek()? {
-//                         let maybe_new_indentation = n / 4;
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.value {
+            HuonValue::Boolean(b) => visitor.visit_bool(b),
+            HuonValue::Int(i) => visitor.visit_i64(i),
+            // `s` is `&'de str`, `visit_borrowed_str` expects `&'de str`. This is correct.
+            HuonValue::String(s) => visitor.visit_borrowed_str(s),
+            // `map` is `&'de ValueMap<'de>`.
+            HuonValue::Object(map) => visitor.visit_map(MapDeserializer::new(map)),
+        }
+    }
 
-//                     }
-//                 }
-//                 Token::Boolean(_) | Token::Identifier(_) | Token::Int(_) | Token::Str(_) => {
-//                     return Ok(token);
-//                 }
-//             }
-//         }
-//     }
-// }
+    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.value {
+            HuonValue::Boolean(b) => visitor.visit_bool(b),
+            _ => Err(de::Error::custom("Expected bool")),
+        }
+    }
 
-// impl<'de> de::Deserializer<'de> for &mut Deserializer<'_, 'de> {
-//     type Error = crate::Error<'de>;
+    fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.value {
+            HuonValue::Int(i) => visitor.visit_i64(i),
+            _ => Err(de::Error::custom("Expected i64")),
+        }
+    }
 
-//     fn deserialize_any<V>(self, visitor: V) -> Result<'de, V::Value>
-//     where
-//         V: de::Visitor<'de>,
-//     {
-//         if self.is_root {
-//             self.is_root = false;
-//             return self.deserialize_map(visitor);
-//         }
+    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.value {
+            HuonValue::String(s) => visitor.visit_borrowed_str(s),
+            _ => Err(de::Error::custom("Expected string")),
+        }
+    }
 
-//         match self.peek()? {
-//             Token::Identifier(s) => visitor.visit_borrowed_str(s),
-//             Token::Str(s) => visitor.visit_str(s),
-//             Token::Int(i) => visitor.visit_i64(i),
-//             Token::Boolean(b) => visitor.visit_bool(b),
-//             token => Err(Error::InvalidToken(token)),
-//         }
-//     }
+    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.value {
+            HuonValue::String(s) => visitor.visit_borrowed_str(s),
+            _ => Err(de::Error::custom("Expected str")),
+        }
+    }
 
-//     fn deserialize_map<V>(self, visitor: V) -> StdResult<V::Value, Self::Error>
-//     where
-//         V: de::Visitor<'de>,
-//     {
-//         let mut map = visitor.visit_map(MapAccess::new(self))?;
-//     }
+    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.value {
+            // `map` is `&'de ValueMap<'de>`, so `MapDeserializer::new(map)` is correct.
+            HuonValue::Object(map) => visitor.visit_map(MapDeserializer::new(map)),
+            _ => Err(de::Error::custom("Expected map")),
+        }
+    }
 
-//     forward_to_deserialize_any! {
-//         bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
-//         bytes byte_buf option unit unit_struct newtype_struct seq tuple
-//         tuple_struct struct enum identifier ignored_any
-//     }
-// }
-// struct MapAccess<'a, 'b: 'a, 'de> {
-//     de: &'b mut Deserializer<'a, 'de>,
-//     // The indentation level that this map is parsing.
-//     current_indent: usize,
-// }
+    fn deserialize_struct<V>(
+        self,
+        _name: &'static str,
+        _fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        self.deserialize_map(visitor)
+    }
 
-// impl<'a, 'b, 'de: 'a> de::MapAccess<'de> for MapAccess<'a, 'b, 'de> {
-//     type Error = Error<'de>;
+    fn deserialize_newtype_struct<V>(
+        self,
+        _name: &'static str,
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_newtype_struct(self)
+    }
 
-//     /// Attempt to deserialize the next key.
-//     fn next_key_seed<K>(&mut self, seed: K) -> Result<'de, Option<K::Value>>
-//     where
-//         K: de::DeserializeSeed<'de>,
-//     {
-//         // Peek at the next non-formatting token.
-//         let token = self.de.advance_to_symbol()?;
+    forward_to_deserialize_any! {
+        i8 i16 i32 u8 u16 u32 u64 f32 f64 char bytes byte_buf option unit unit_struct
+        seq tuple tuple_struct enum identifier ignored_any
+    }
+}
 
-//         // If the indentation is less than the map's expected level, we consider it the end of this mapping.
-//         if indent < self.current_indent {
-//             return Ok(None);
-//         }
+struct MapDeserializer<'de> {
+    iter: hash_map::IntoIter<&'de str, HuonValue<'de>>,
+    next_value: Option<HuonValue<'de>>,
+}
 
-//         // Otherwise, treat the token as a key.
-//         // Before deserializing the key, update the current indentation if necessary.
-//         self.de.current_indent = indent;
-//         let key = seed.deserialize(&mut *self.de)?;
-//         Ok(Some(key))
-//     }
+impl<'de> MapDeserializer<'de> {
+    fn new(map: ValueMap<'de>) -> Self {
+        Self {
+            iter: map.into_iter(),
+            next_value: None,
+        }
+    }
+}
 
-//     /// Deserialize the value corresponding to the previously deserialized key.
-//     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
-//     where
-//         V: de::DeserializeSeed<'de>,
-//     {
-//         // After a key, we expect a value. In many cases you might have a colon separator,
-//         // which you would verify here. For simplicity we assume the value follows immediately.
-//         seed.deserialize(&mut *self.de)
-//     }
-// }
+// The MapAccess impl is for 'de
+impl<'de> de::MapAccess<'de> for MapDeserializer<'de> {
+    type Error = de::value::Error;
 
-// pub fn from_str<'de, T>(s: &'de str) -> Result<'de, T>
-// where
-//     T: de::Deserialize<'de>,
-// {
-//     let mut tokenizer = Tokenizer::new(s);
-//     let tokens = tokenizer.scan()?;
+    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
+    where
+        K: de::DeserializeSeed<'de>,
+    {
+        match self.iter.next() {
+            Some((key, value)) => {
+                // store the owned value for the subsequent `next_value_seed` call
+                self.next_value = Some(value);
+                // key is `&'de str` (owned pointer), pass it directly
+                let key_deserializer = de::IntoDeserializer::into_deserializer(key);
+                seed.deserialize(key_deserializer).map(Some)
+            }
+            None => Ok(None),
+        }
+    }
 
-//     let mut deserializer = Deserializer {
-//         tokens: &tokens,
-//         cursor: 0,
-//         is_root: true,
-//         indentation_level: 0,
-//     };
+    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::DeserializeSeed<'de>,
+    {
+        match self.next_value.take() {
+            Some(value) => {
+                // `value` is `HuonValue<'de>` (owned). Create a deserializer that owns it.
+                let value_deserializer = HuonDeserializer { value };
+                seed.deserialize(value_deserializer)
+            }
+            None => Err(de::Error::custom(
+                "Called next_value_seed before next_key_seed",
+            )),
+        }
+    }
+}
 
-//     T::deserialize(&mut deserializer)
-// }
+#[derive(Debug)]
+pub enum HuonDeserializeError<'de> {
+    SerdeError(serde::de::value::Error),
+    ParserError(crate::parser::ParserError<'de>),
+    TokenizerError(crate::tokenizer::TokenizerError),
+}
+
+pub fn from_str<'de, T>(s: &'de str) -> Result<T, HuonDeserializeError<'de>>
+where
+    T: Deserialize<'de>,
+{
+    let tokens = Tokenizer::scan(s).map_err(|err| HuonDeserializeError::TokenizerError(err))?;
+
+    let parsed = Parser::parse(tokens).map_err(|err| HuonDeserializeError::ParserError(err))?;
+
+    let value_tree = HuonValue::Object(parsed);
+
+    let deserializer = HuonDeserializer { value: value_tree };
+
+    Ok(T::deserialize(deserializer).map_err(|err| HuonDeserializeError::SerdeError(err))?)
+}
+
+#[cfg(test)]
+#[allow(unused)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Deserialize, PartialEq, Eq)]
+    struct NewType<'a>(&'a str);
+
+    #[derive(Debug, Deserialize, PartialEq, Eq)]
+    struct JobCategory<'a> {
+        #[serde(borrow)]
+        name: NewType<'a>,
+    }
+
+    #[derive(Debug, Deserialize, PartialEq, Eq)]
+    struct PayRate<'a> {
+        iteration: &'a str,
+        date: &'a str,
+    }
+
+    #[derive(Debug, Deserialize, PartialEq, Eq)]
+    struct JobInfo<'a> {
+        pay: i64,
+        #[serde(borrow)]
+        payrate: PayRate<'a>,
+    }
+
+    #[derive(Debug, Deserialize, PartialEq, Eq)]
+    struct Job<'a> {
+        category: JobCategory<'a>,
+        info: JobInfo<'a>,
+        name: &'a str,
+    }
+
+    #[derive(Debug, Deserialize, PartialEq, Eq)]
+    struct Person<'a> {
+        name: &'a str,
+        age: i64,
+        job: Job<'a>,
+    }
+
+    #[test]
+    fn test_deserialization() {
+        let input = include_str!("../simple.huon").to_owned();
+
+        let person: Person = from_str(&input).expect("Deserialization failed");
+
+        let expected_person = Person {
+            name: "John",
+            age: 32,
+            job: Job {
+                category: JobCategory {
+                    name: NewType("IT"),
+                },
+                info: JobInfo {
+                    pay: 4200,
+                    payrate: PayRate {
+                        iteration: "monthly",
+                        date: "Last Friday of every month",
+                    },
+                },
+                name: "Software Engineer",
+            },
+        };
+
+        assert_eq!(person, expected_person);
+    }
+}

@@ -1,3 +1,12 @@
 {
-  "cSpell.words": ["Dedented", "huan", "huon", "serde", "thiserror"]
+  "cSpell.words": [
+    "clippy",
+    "Dedented",
+    "huan",
+    "huon",
+    "newtype",
+    "payrate",
+    "serde",
+    "thiserror"
+  ]
 }

@@ -35,10 +35,12 @@ impl<'a> Tokenizer<'a> {
 }
 
 impl<'a> Tokenizer<'a> {
-    pub fn scan(&mut self) -> Result<Vec<Token<'a>>> {
+    pub fn scan(input: &'a str) -> Result<Vec<Token<'a>>> {
+        let mut tokenizer = Self::new(input);
+
         let mut buffer = Vec::new();
         loop {
-            match self.next_token() {
+            match tokenizer.next_token() {
                 Ok(token) => buffer.push(token),
                 Err(TokenizerError::EOF) => break,
                 Err(err) => return Err(err),
@@ -230,18 +232,6 @@ mod test {
         assert_eq!(lexer.advance()?, 'c');
         assert_eq!(lexer.peek(), Err(TokenizerError::EOF));
         assert_eq!(lexer.cursor, 3);
-
-        Ok(())
-    }
-
-    #[test]
-    fn lexer() -> Result<()> {
-        let input = include_str!("../../test.huon");
-
-        let mut lexer = Tokenizer::new(input);
-        let tokens = lexer.scan()?;
-
-        dbg!(tokens);
 
         Ok(())
     }
