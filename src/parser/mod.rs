@@ -20,6 +20,8 @@ pub enum ParserError<'a> {
     InvalidHuonValue(Token<'a>),
 }
 
+type ValueMap<'a> = HashMap<&'a str, HuonValue<'a>>;
+
 pub struct Parser<'a> {
     input: Vec<Token<'a>>,
     cursor: usize,
@@ -35,8 +37,9 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<'a, HashMap<&'a str, HuonValue<'a>>> {
-        self.parse_object(0)
+    pub fn parse(input: Vec<Token<'a>>) -> Result<'a, ValueMap<'a>> {
+        let mut parser = Self::new(input);
+        parser.parse_object(0)
     }
 
     /// A helper func to check if a token is whitespace with the expected indentation.
@@ -57,72 +60,65 @@ impl<'a> Parser<'a> {
         Ok(false)
     }
 
-    fn parse_object(
-        &mut self,
-        expected_indent: usize,
-    ) -> Result<'a, HashMap<&'a str, HuonValue<'a>>> {
+    fn parse_object(&mut self, expected_indent: usize) -> Result<'a, ValueMap<'a>> {
         let mut map = HashMap::new();
 
         while let Ok(token) = self.peek() {
-            // this is to "notify" recursive calls that they should return and
-            // dedent 1 level
             if self.collapse > 0 {
                 self.collapse -= 1;
                 return Ok(map);
             }
 
-            // First check the line's starting whitespace.
-            let had_whitespace_check = self.check_indentation(token, expected_indent)?;
-
-            // If the token is a NewLine, consume it and check for a dedented identifier.
             if let Token::NewLine = token {
-                self.advance()?; // consume the newline
+                self.advance()?;
 
-                // Check if the following token indicates an identifier with a dedented (or no) preceding whitespace.
-                // This implements your special "collapse" behavior.
-                if let (Token::Identifier(_), true, false) =
-                    (self.peek()?, expected_indent > 0, had_whitespace_check)
-                {
-                    // we subtract 1 because we will do the first return immediately
-                    self.collapse = expected_indent - 1;
-                    return Ok(map);
+                let next_token = self.peek()?;
+
+                match next_token {
+                    Token::WhiteSpace(n) if expected_indent > 0 && (n / 4) < expected_indent => {
+                        self.collapse = expected_indent - (n / 4) - 1;
+                        return Ok(map);
+                    }
+
+                    Token::Identifier(_) if expected_indent == 1 => {
+                        return Ok(map);
+                    }
+
+                    _ => continue,
                 }
             }
 
-            // Check indentation again before attempting to parse a key.
-            let next_token = self.peek()?;
-            self.check_indentation(next_token, expected_indent)?;
+            self.check_indentation(token, expected_indent)?;
 
-            // Expect an identifier key.
             let key = match self.advance()? {
                 Token::Identifier(s) => s,
                 token => return Err(ParserError::InvalidToken(token)),
             };
 
-            // Now decide whether the value is inline or a nested block.
             let value = match self.peek()? {
-                // Inline value: indicated by a single whitespace.
                 Token::WhiteSpace(1) => {
-                    self.advance()?; // consume the inline whitespace
+                    self.advance()?;
                     self.parse_value()?
                 }
-                // Nested object: indicated by a newline.
+
                 Token::NewLine => {
-                    self.advance()?; // consume the newline
-                    // The next token must be whitespace with an indentation strictly greater than expected.
+                    self.advance()?;
+
                     match self.peek()? {
                         Token::WhiteSpace(n) if (n / 4) > expected_indent => {
-                            self.advance()?; // consume the nested whitespace
+                            self.advance()?;
                             HuonValue::Object(self.parse_object(n / 4)?)
                         }
                         token => return Err(ParserError::InvalidToken(token)),
                     }
                 }
+
                 token => return Err(ParserError::InvalidToken(token)),
             };
 
             map.insert(key, value);
         }
+
         Ok(map)
     }
 
@@ -152,13 +148,26 @@ mod tests {
     use {super::*, crate::tokenizer::Tokenizer};
 
     #[test]
-    fn test_parser() {
+    fn test_parser() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut tokenizer = Tokenizer::new(include_str!("../../test.huon"));
-        let tokens = tokenizer.scan().unwrap();
+        let tokens = tokenizer.scan()?;
 
-        let mut parser = Parser::new(tokens);
-        let result = parser.parse().unwrap();
+        let result = Parser::parse(tokens)?;
 
-        dbg!(result);
+        let HuonValue::Object(map) = &result["first_job"] else {
+            panic!("Expected object");
+        };
+
+        let HuonValue::Object(map) = &map["info"] else {
+            panic!("Expected object");
+        };
+
+        let HuonValue::Int(pay) = map["pay"] else {
+            panic!("Expected object");
+        };
+
+        assert_eq!(pay, 4200);
+
+        Ok(())
     }
 }

@@ -14,61 +14,101 @@ However, I will do this in the future.
 Given the input from [the test file](test.huon).
 ```yml
 name: "John"
-age: 23
-address:
-    house: "Abyss"
-    city:
-        name: "Underworld"
-        postal: 66666
-john_is_adult: true
-family:
-    dad: "Devil 2"
-    mom: "Devil 1"
-combined_family_age: 398
+first_job:
+    category:
+        name: "IT"
+    info:
+        pay: 4200
+        payrate:
+            iteration: "monthly"
+            date: "Last Friday of every month"
+    name: "Software Engineer"
+age: 32
+second_job:
+    category:
+        name: "Security"
+    info:
+        pay: 3700
+        payrate:
+            iteration: "weekly"
+            date: "Every Friday"
+    name: "Bodyguard"
+last_name: "Doe"
 ```
 
 Will output:
 ```rs
 {
-    "age": Int(
-        23,
-    ),
-    "combined_family_age": Int(
-        398,
-    ),
     "name": String(
         "John",
     ),
-    "john_is_adult": Boolean(
-        true,
+    "age": Int(
+        32,
     ),
-    "address": Object(
+    "second_job": Object(
         {
-            "house": String(
-                "Abyss",
+            "name": String(
+                "Bodyguard",
             ),
-            "city": Object(
+            "category": Object(
                 {
                     "name": String(
-                        "Underworld",
+                        "Security",
                     ),
-                    "postal": Int(
-                        66666,
+                },
+            ),
+            "info": Object(
+                {
+                    "pay": Int(
+                        3700,
+                    ),
+                    "payrate": Object(
+                        {
+                            "iteration": String(
+                                "weekly",
+                            ),
+                            "date": String(
+                                "Every Friday",
+                            ),
+                        },
                     ),
                 },
             ),
         },
     ),
-    "family": Object(
+    "first_job": Object(
         {
-            "mom": String(
-                "Devil 1",
+            "category": Object(
+                {
+                    "name": String(
+                        "IT",
+                    ),
+                },
             ),
-            "dad": String(
-                "Devil 2",
+            "info": Object(
+                {
+                    "payrate": Object(
+                        {
+                            "date": String(
+                                "Last Friday of every month",
+                            ),
+                            "iteration": String(
+                                "monthly",
+                            ),
+                        },
+                    ),
+                    "pay": Int(
+                        4200,
+                    ),
+                },
+            ),
+            "name": String(
+                "Software Engineer",
             ),
         },
     ),
+    "last_name": String(
+        "Doe",
+    ),
 }
 ```
-(by running the test in [parser/mod.rs](./src/parser/mod.rs))

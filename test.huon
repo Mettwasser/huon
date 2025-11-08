@@ -1,12 +1,21 @@
 name: "John"
-age: 23
-address:
-    house: "Abyss"
-    city:
-        name: "Underworld"
-        postal: 66666
-john_is_adult: true
-family:
-    dad: "Devil 2"
-    mom: "Devil 1"
-combined_family_age: 398
+first_job:
+    category:
+        name: "IT"
+    info:
+        pay: 4200
+        payrate:
+            iteration: "monthly"
+            date: "Last Friday of every month"
+    name: "Software Engineer"
+age: 32
+second_job:
+    category:
+        name: "Security"
+    info:
+        pay: 3700
+        payrate:
+            iteration: "weekly"
+            date: "Every Friday"
+    name: "Bodyguard"
+last_name: "Doe"
