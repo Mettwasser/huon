@@ -185,54 +185,21 @@ where
 #[cfg(test)]
 #[allow(unused)]
 mod tests {
+    use crate::test_model::{Job, JobCategory, JobInfo, NewType, PayRate, Person};
+
     use super::*;
-
-    #[derive(Debug, Deserialize, PartialEq, Eq)]
-    struct NewType<'a>(&'a str);
-
-    #[derive(Debug, Deserialize, PartialEq, Eq)]
-    struct JobCategory<'a> {
-        #[serde(borrow)]
-        name: NewType<'a>,
-    }
-
-    #[derive(Debug, Deserialize, PartialEq, Eq)]
-    struct PayRate<'a> {
-        iteration: &'a str,
-        date: &'a str,
-    }
-
-    #[derive(Debug, Deserialize, PartialEq, Eq)]
-    struct JobInfo<'a> {
-        pay: i64,
-        #[serde(borrow)]
-        payrate: PayRate<'a>,
-    }
-
-    #[derive(Debug, Deserialize, PartialEq, Eq)]
-    struct Job<'a> {
-        category: JobCategory<'a>,
-        info: JobInfo<'a>,
-        name: &'a str,
-    }
-
-    #[derive(Debug, Deserialize, PartialEq, Eq)]
-    struct Person<'a> {
-        name: &'a str,
-        age: i64,
-        job: Job<'a>,
-    }
 
     #[test]
     fn test_deserialization() {
-        let input = include_str!("../simple.huon").to_owned();
+        let input = include_str!("../test.huon").to_owned();
 
         let person: Person = from_str(&input).expect("Deserialization failed");
 
         let expected_person = Person {
             name: "John",
+            last_name: "Doe",
             age: 32,
-            job: Job {
+            first_job: Job {
                 category: JobCategory {
                     name: NewType("IT"),
                 },
@@ -244,6 +211,19 @@ mod tests {
                     },
                 },
                 name: "Software Engineer",
+            },
+            second_job: Job {
+                category: JobCategory {
+                    name: NewType("Security"),
+                },
+                info: JobInfo {
+                    pay: 3700,
+                    payrate: PayRate {
+                        iteration: "weekly",
+                        date: "Every Friday",
+                    },
+                },
+                name: "Bodyguard",
             },
         };
 
