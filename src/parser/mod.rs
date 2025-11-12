@@ -8,7 +8,7 @@ pub mod value;
 
 type Result<'a, T> = std::result::Result<T, ParserError<'a>>;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq, PartialOrd)]
 pub enum ParserError<'a> {
     #[error("EOF")]
     Eof,
@@ -124,12 +124,14 @@ impl<'a> Parser<'a> {
 
     fn parse_value(&mut self) -> Result<'a, HuonValue<'a>> {
         // This function will try to parse a literal value.
-        match self.advance()? {
-            Token::Str(s) => Ok(HuonValue::String(s)),
-            Token::Int(i) => Ok(HuonValue::Int(i)),
-            Token::Boolean(b) => Ok(HuonValue::Boolean(b)),
-            token => Err(ParserError::InvalidToken(token)),
-        }
+        Ok(match self.advance()? {
+            Token::Str(s) => HuonValue::String(s),
+            Token::Int(i) => HuonValue::Int(i),
+            Token::Boolean(b) => HuonValue::Boolean(b),
+            Token::Float(f) => HuonValue::Float(f),
+            Token::Null => HuonValue::Null,
+            token => return Err(ParserError::InvalidToken(token)),
+        })
     }
 
     fn peek(&self) -> Result<'a, Token<'a>> {
@@ -165,26 +167,27 @@ mod tests {
 
         let expected = map! {
             "name" => HuonValue::String("John"),
-            "first_job" => HuonValue::Object(map! {
+            "job1" => HuonValue::Object(map! {
                 "category" => HuonValue::Object(map! {
                     "name" => HuonValue::String("IT")
                 }),
                 "info" => HuonValue::Object(map! {
-                    "pay" => HuonValue::Int(4200),
+                    "pay" => HuonValue::Float(-4200.5),
                     "payrate" => HuonValue::Object(map! {
                         "iteration" => HuonValue::String("monthly"),
-                        "date" => HuonValue::String("Last Friday of every month")
+                        "date" => HuonValue::String("Last Friday of every month"),
+                        "monthly_increase" => HuonValue::String("5%")
                     })
                 }),
                 "name" => HuonValue::String("Software Engineer")
             }),
             "age" => HuonValue::Int(32),
-            "second_job" => HuonValue::Object(map! {
+            "job2" => HuonValue::Object(map! {
                 "category" => HuonValue::Object(map! {
                     "name" => HuonValue::String("Security")
                 }),
                 "info" => HuonValue::Object(map! {
-                    "pay" => HuonValue::Int(3700),
+                    "pay" => HuonValue::Int(3700), // treated as an int here because the parser/tokenizer does not find an integer
                     "payrate" => HuonValue::Object(map! {
                         "iteration" => HuonValue::String("weekly"),
                         "date" => HuonValue::String("Every Friday")
@@ -196,6 +199,17 @@ mod tests {
         };
 
         assert_eq!(map, expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn fail_int_before_ident() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let tokens = Tokenizer::scan("1job1: \"swe\"")?;
+
+        let err = Parser::parse(tokens).unwrap_err();
+
+        assert_eq!(err, ParserError::InvalidToken(Token::Int(1)));
 
         Ok(())
     }

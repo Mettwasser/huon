@@ -1,11 +1,22 @@
 use std::{collections::HashMap, ops::Index};
 
 /// Cloning is fairly cheap.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum HuonValue<'a> {
+    // String types
     String(&'a str),
+
+    // Numeric types
     Int(i64),
+    Float(f64),
+
+    // Bool types
     Boolean(bool),
+
+    // Null types
+    Null,
+
+    // Composite types
     Object(HashMap<&'a str, HuonValue<'a>>),
 }
 

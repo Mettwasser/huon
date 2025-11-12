@@ -1,7 +1,10 @@
 pub mod token;
+use std::num::ParseFloatError;
+
 use token::Token;
 
-#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+#[error(transparent)]
 pub enum TokenizerError {
     /// End of file
     #[error("End of file")]
@@ -12,6 +15,8 @@ pub enum TokenizerError {
 
     #[error("Found an unexpected character: {_0}")]
     UnexpectedCharacter(char),
+
+    ParseFloatError(#[from] ParseFloatError),
 }
 
 type Result<T> = std::result::Result<T, TokenizerError>;
@@ -55,9 +60,16 @@ impl<'a> Tokenizer<'a> {
         match self.advance()? {
             '"' => self.read_string(),
 
-            char if char.is_ascii_digit() => self.read_number(token_start_idx),
+            char if char.is_ascii_digit() || char == '-' => self.read_number(token_start_idx),
 
-            char if is_valid_identifier_char(char) => {
+            char if is_valid_identifier_char(char)
+                && !self
+                    .input
+                    .chars()
+                    .nth(token_start_idx)
+                    .unwrap()
+                    .is_digit(10) =>
+            {
                 let raw_ident = self.read_identifier(token_start_idx)?;
 
                 match self.peek() {
@@ -70,12 +82,11 @@ impl<'a> Tokenizer<'a> {
                     _ => (),
                 }
 
-                parse_bool(raw_ident)
-                    .map(Token::Boolean)
-                    .ok_or_else(|| TokenizerError::InvalidIdentifier(raw_ident.to_owned()))
+                parse_keyword(raw_ident).ok_or(TokenizerError::UnexpectedCharacter(char))
             }
 
             '\n' => Ok(Token::NewLine),
+
             '\r' => match self.peek()? {
                 '\n' => {
                     self.advance()?;
@@ -135,11 +146,26 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn read_number(&mut self, start_idx: usize) -> Result<Token<'a>> {
+        if let Ok(char) = self.peek()
+            && char == '-'
+        {
+            self.advance()?;
+        }
+
         self.advance_until(|char| !char.is_ascii_digit())?;
 
-        Ok(Token::Int(
-            self.input[start_idx..self.cursor].parse().unwrap(),
-        ))
+        if let Ok(char) = self.peek()
+            && char == '.'
+        {
+            self.advance()?; // consume '.'
+            self.advance_until(|char| !char.is_ascii_digit())?; // consume digits after the dot
+
+            Ok(Token::Float(self.input[start_idx..self.cursor].parse()?))
+        } else {
+            Ok(Token::Int(
+                self.input[start_idx..self.cursor].parse().unwrap(),
+            ))
+        }
     }
 
     fn read_whitespace(&mut self, start_idx: usize) -> Result<Token<'a>> {
@@ -168,19 +194,22 @@ impl<'a> Tokenizer<'a> {
 }
 
 fn is_valid_identifier_char(char: char) -> bool {
-    char.is_ascii_alphabetic() || ['_'].contains(&char)
+    (char.is_ascii_alphabetic() || char.is_digit(10)) || ['_'].contains(&char)
 }
 
-fn parse_bool(input: &str) -> Option<bool> {
-    match input {
-        "true" => Some(true),
-        "false" => Some(false),
-        _ => None,
-    }
+fn parse_keyword(input: &str) -> Option<Token<'_>> {
+    Some(match input {
+        "true" => Token::Boolean(true),
+        "false" => Token::Boolean(false),
+        "null" => Token::Null,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
 mod test {
+    use pretty_assertions::assert_eq;
+
     use crate::tokenizer::TokenizerError;
     use crate::tokenizer::token::Token;
 
@@ -201,13 +230,69 @@ mod test {
     }
 
     #[test]
-    fn read_number() -> Result<()> {
+    fn identifier() -> Result<()> {
+        let input = "job1: \"swe\"";
+        let tokens = Tokenizer::scan(input)?;
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("job1"),
+                Token::WhiteSpace(1),
+                Token::Str("swe")
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn read_number_i64() -> Result<()> {
         let input = r#"number: 69420"#;
         let mut lexer = Tokenizer::new(input);
         lexer.cursor = 8;
         let s = lexer.read_number(8)?;
 
         assert_eq!(s, Token::Int(69420));
+        assert_eq!(lexer.advance(), Err(TokenizerError::EOF));
+
+        Ok(())
+    }
+
+    #[test]
+    fn read_number_f64() -> Result<()> {
+        let input = r#"number: 69420.187"#;
+        let mut lexer = Tokenizer::new(input);
+        lexer.cursor = 8;
+        let s = lexer.read_number(8)?;
+
+        assert_eq!(s, Token::Float(69420.187));
+        assert_eq!(lexer.advance(), Err(TokenizerError::EOF));
+
+        Ok(())
+    }
+
+    #[test]
+    fn read_number_i64_negative() -> Result<()> {
+        let input = r#"number: -69420"#;
+        let mut lexer = Tokenizer::new(input);
+        lexer.cursor = 8;
+        let s = lexer.read_number(8)?;
+
+        assert_eq!(s, Token::Int(-69420));
+        assert_eq!(lexer.advance(), Err(TokenizerError::EOF));
+
+        Ok(())
+    }
+
+    #[test]
+    fn read_number_f64_negative() -> Result<()> {
+        let input = r#"number: -69420.187"#;
+        let mut lexer = Tokenizer::new(input);
+        lexer.cursor = 8;
+        let s = lexer.read_number(8)?;
+
+        assert_eq!(s, Token::Float(-69420.187));
         assert_eq!(lexer.advance(), Err(TokenizerError::EOF));
 
         Ok(())

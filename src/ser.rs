@@ -136,16 +136,14 @@ impl<'a, W: io::Write> Serializer for &'a mut HuonSerializer<W> {
         ))
     }
 
-    fn serialize_f32(self, _v: f32) -> Result<Self::Ok, Self::Error> {
-        Err(HuonSerializeError::Custom(
-            "Floating point numbers are not supported in Huon".to_string(),
-        ))
+    fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
+        self.serialize_f64(v as f64)
     }
 
-    fn serialize_f64(self, _v: f64) -> Result<Self::Ok, Self::Error> {
-        Err(HuonSerializeError::Custom(
-            "Floating point numbers are not supported in Huon".to_string(),
-        ))
+    fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
+        self.write_non_map_value_separator()?;
+        write!(self.writer, "{v}")?;
+        Ok(())
     }
 
     fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
@@ -171,18 +169,16 @@ impl<'a, W: io::Write> Serializer for &'a mut HuonSerializer<W> {
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        Err(HuonSerializeError::Custom(
-            "Options are not supported in huon".to_string(),
-        ))
+        self.write_non_map_value_separator()?;
+        write!(self.writer, "null")?;
+        Ok(())
     }
 
-    fn serialize_some<T>(self, _value: &T) -> Result<Self::Ok, Self::Error>
+    fn serialize_some<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
     where
         T: ?Sized + Serialize,
     {
-        Err(HuonSerializeError::Custom(
-            "Options are not supported in huon".to_string(),
-        ))
+        value.serialize(self)
     }
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
@@ -381,6 +377,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
+
     use crate::test_model::{Job, JobCategory, JobInfo, NewType, PayRate, Person};
 
     use super::*;
@@ -391,28 +389,30 @@ mod tests {
             name: "John",
             last_name: "Doe",
             age: 32,
-            first_job: Job {
+            job1: Job {
                 category: JobCategory {
                     name: NewType("IT"),
                 },
                 info: JobInfo {
-                    pay: 4200,
+                    pay: -4200.50,
                     payrate: PayRate {
                         iteration: "monthly",
                         date: "Last Friday of every month",
+                        monthly_increase: Some("5%"),
                     },
                 },
                 name: "Software Engineer",
             },
-            second_job: Job {
+            job2: Job {
                 category: JobCategory {
                     name: NewType("Security"),
                 },
                 info: JobInfo {
-                    pay: 3700,
+                    pay: 3700_f64,
                     payrate: PayRate {
                         iteration: "weekly",
                         date: "Every Friday",
+                        monthly_increase: None,
                     },
                 },
                 name: "Bodyguard",

@@ -1,15 +1,16 @@
 name: "John"
-first_job:
+job1:
     category:
         name: "IT"
     info:
-        pay: 4200
+        pay: -4200.5
         payrate:
             iteration: "monthly"
             date: "Last Friday of every month"
+            monthly_increase: "5%"
     name: "Software Engineer"
 age: 32
-second_job:
+job2:
     category:
         name: "Security"
     info:

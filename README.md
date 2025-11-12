@@ -14,7 +14,7 @@ However, I will do this in the future.
 Given the input from [the test file](test.huon).
 ```yml
 name: "John"
-first_job:
+job1:
     category:
         name: "IT"
     info:
@@ -24,7 +24,7 @@ first_job:
             date: "Last Friday of every month"
     name: "Software Engineer"
 age: 32
-second_job:
+job2:
     category:
         name: "Security"
     info:
@@ -45,7 +45,7 @@ Will output:
     "age": Int(
         32,
     ),
-    "second_job": Object(
+    "job2": Object(
         {
             "name": String(
                 "Bodyguard",
@@ -76,7 +76,7 @@ Will output:
             ),
         },
     ),
-    "first_job": Object(
+    "job1": Object(
         {
             "category": Object(
                 {

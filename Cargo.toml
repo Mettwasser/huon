@@ -9,3 +9,6 @@ thiserror = "2.0.17"
 
 [lints.clippy]
 "pedantic" = "warn"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"

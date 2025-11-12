@@ -25,6 +25,8 @@ impl<'de> Deserializer<'de> for HuonDeserializer<'de> {
             HuonValue::Boolean(b) => visitor.visit_bool(b),
             HuonValue::Int(i) => visitor.visit_i64(i),
             HuonValue::String(s) => visitor.visit_borrowed_str(s),
+            HuonValue::Float(f) => visitor.visit_f64(f),
+            HuonValue::Null => visitor.visit_none(),
             HuonValue::Object(map) => visitor.visit_map(MapDeserializer::new(map)),
         }
     }
@@ -54,7 +56,7 @@ impl<'de> Deserializer<'de> for HuonDeserializer<'de> {
         V: Visitor<'de>,
     {
         match self.value {
-            HuonValue::String(s) => visitor.visit_borrowed_str(s),
+            HuonValue::String(s) => visitor.visit_string(s.to_string()),
             _ => Err(de::Error::custom("Expected string")),
         }
     }
@@ -103,8 +105,18 @@ impl<'de> Deserializer<'de> for HuonDeserializer<'de> {
         visitor.visit_newtype_struct(self)
     }
 
+    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.value {
+            HuonValue::Null => visitor.visit_none(),
+            _ => visitor.visit_some(self),
+        }
+    }
+
     forward_to_deserialize_any! {
-        i8 i16 i32 u8 u16 u32 u64 f32 f64 char bytes byte_buf option unit unit_struct
+        i8 i16 i32 u8 u16 u32 u64 f32 f64 char bytes byte_buf unit unit_struct
         seq tuple tuple_struct enum identifier ignored_any
     }
 }
@@ -133,9 +145,7 @@ impl<'de> de::MapAccess<'de> for MapDeserializer<'de> {
     {
         match self.iter.next() {
             Some((key, value)) => {
-                // store the owned value for the subsequent `next_value_seed` call
                 self.next_value = Some(value);
-                // key is `&'de str` (owned pointer), pass it directly
                 let key_deserializer = de::IntoDeserializer::into_deserializer(key);
                 seed.deserialize(key_deserializer).map(Some)
             }
@@ -149,7 +159,6 @@ impl<'de> de::MapAccess<'de> for MapDeserializer<'de> {
     {
         match self.next_value.take() {
             Some(value) => {
-                // `value` is `HuonValue<'de>` (owned). Create a deserializer that owns it.
                 let value_deserializer = HuonDeserializer { value };
                 seed.deserialize(value_deserializer)
             }
@@ -185,6 +194,8 @@ where
 #[cfg(test)]
 #[allow(unused)]
 mod tests {
+    use pretty_assertions::assert_eq;
+
     use crate::test_model::{Job, JobCategory, JobInfo, NewType, PayRate, Person};
 
     use super::*;
@@ -199,28 +210,30 @@ mod tests {
             name: "John",
             last_name: "Doe",
             age: 32,
-            first_job: Job {
+            job1: Job {
                 category: JobCategory {
                     name: NewType("IT"),
                 },
                 info: JobInfo {
-                    pay: 4200,
+                    pay: -4200.50,
                     payrate: PayRate {
                         iteration: "monthly",
                         date: "Last Friday of every month",
+                        monthly_increase: Some("5%"),
                     },
                 },
                 name: "Software Engineer",
             },
-            second_job: Job {
+            job2: Job {
                 category: JobCategory {
                     name: NewType("Security"),
                 },
                 info: JobInfo {
-                    pay: 3700,
+                    pay: 3700_f64,
                     payrate: PayRate {
                         iteration: "weekly",
                         date: "Every Friday",
+                        monthly_increase: None,
                     },
                 },
                 name: "Bodyguard",
