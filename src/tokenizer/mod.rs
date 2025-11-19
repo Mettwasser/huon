@@ -40,7 +40,7 @@ impl<'a> Tokenizer<'a> {
 }
 
 impl<'a> Tokenizer<'a> {
-    pub fn scan(input: &'a str) -> Result<Vec<Token<'a>>> {
+    pub fn tokenize(input: &'a str) -> Result<Vec<Token<'a>>> {
         let mut tokenizer = Self::new(input);
 
         let mut buffer = Vec::new();
@@ -84,6 +84,12 @@ impl<'a> Tokenizer<'a> {
 
                 parse_keyword(raw_ident).ok_or(TokenizerError::UnexpectedCharacter(char))
             }
+
+            '[' => Ok(Token::ListStart),
+
+            ']' => Ok(Token::ListEnd),
+
+            ',' => Ok(Token::Separator),
 
             '\n' => Ok(Token::NewLine),
 
@@ -232,7 +238,7 @@ mod test {
     #[test]
     fn identifier() -> Result<()> {
         let input = "job1: \"swe\"";
-        let tokens = Tokenizer::scan(input)?;
+        let tokens = Tokenizer::tokenize(input)?;
 
         assert_eq!(
             tokens,
@@ -294,6 +300,61 @@ mod test {
 
         assert_eq!(s, Token::Float(-69420.187));
         assert_eq!(lexer.advance(), Err(TokenizerError::EOF));
+
+        Ok(())
+    }
+
+    #[test]
+    fn read_list_newline() -> Result<()> {
+        let input = "numbers: [
+    -3.5
+    2.5
+    1.1
+]";
+        let tokens = Tokenizer::tokenize(input)?;
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("numbers"),
+                Token::WhiteSpace(1),
+                Token::ListStart,
+                Token::NewLine,
+                Token::WhiteSpace(4),
+                Token::Float(-3.5),
+                Token::NewLine,
+                Token::WhiteSpace(4),
+                Token::Float(2.5),
+                Token::NewLine,
+                Token::WhiteSpace(4),
+                Token::Float(1.1),
+                Token::NewLine,
+                Token::ListEnd,
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn read_list_spaced() -> Result<()> {
+        let input = "numbers: [-3.5 2.5 1.1]";
+        let tokens = Tokenizer::tokenize(input)?;
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("numbers"),
+                Token::WhiteSpace(1),
+                Token::ListStart,
+                Token::Float(-3.5),
+                Token::WhiteSpace(1),
+                Token::Float(2.5),
+                Token::WhiteSpace(1),
+                Token::Float(1.1),
+                Token::ListEnd,
+            ]
+        );
 
         Ok(())
     }

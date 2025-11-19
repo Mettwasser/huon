@@ -72,7 +72,7 @@ impl<'a, W: io::Write> Serializer for &'a mut HuonSerializer<W> {
 
     type SerializeStruct = Self::SerializeMap;
 
-    type SerializeSeq = ser::Impossible<(), HuonSerializeError>;
+    type SerializeSeq = HuonSeqSerializer<'a, W>;
 
     type SerializeTuple = ser::Impossible<(), HuonSerializeError>;
 
@@ -228,10 +228,9 @@ impl<'a, W: io::Write> Serializer for &'a mut HuonSerializer<W> {
         value.serialize(self)
     }
 
-    fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        Err(HuonSerializeError::Custom(
-            "Sequences are not supported in huon".to_string(),
-        ))
+    fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
+        self.write_non_map_value_separator()?;
+        Ok(HuonSeqSerializer::new(self, len))
     }
 
     fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
@@ -357,6 +356,56 @@ impl<'a, W: io::Write> ser::SerializeStruct for HuonMapSerializer<'a, W> {
     }
 }
 
+pub struct HuonSeqSerializer<'a, W: io::Write> {
+    ser: &'a mut HuonSerializer<W>,
+    first: bool,
+    length: Option<usize>,
+    idx: usize,
+}
+
+impl<'a, W: io::Write> HuonSeqSerializer<'a, W> {
+    pub fn new(ser: &'a mut HuonSerializer<W>, length: Option<usize>) -> HuonSeqSerializer<'a, W> {
+        HuonSeqSerializer {
+            ser,
+            first: true,
+            length,
+            idx: 0,
+        }
+    }
+
+    fn is_last(&self) -> bool {
+        self.length == Some(self.idx + 1)
+    }
+}
+
+impl<'a, W: io::Write> ser::SerializeSeq for HuonSeqSerializer<'a, W> {
+    type Ok = ();
+    type Error = HuonSerializeError;
+
+    fn serialize_element<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Self::Error> {
+        if self.first {
+            write!(self.ser.writer, "[")?;
+            self.first = false;
+        }
+
+        value.serialize(&mut *self.ser)?;
+
+        if !self.is_last() {
+            write!(self.ser.writer, ", ")?;
+        }
+
+        self.idx += 1;
+
+        Ok(())
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        write!(self.ser.writer, "]")?;
+
+        Ok(())
+    }
+}
+
 pub fn to_string<T>(value: &T) -> Result<String, HuonSerializeError>
 where
     T: ?Sized + Serialize,
@@ -379,7 +428,10 @@ where
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use crate::test_model::{Job, JobCategory, JobInfo, NewType, PayRate, Person};
+    use crate::{
+        test_list_model::{CodeInfo, TestCodes},
+        test_model::{Job, JobCategory, JobInfo, NewType, PayRate, Person},
+    };
 
     use super::*;
 
@@ -422,6 +474,25 @@ mod tests {
         let s = to_string(&expected_person).unwrap();
 
         let expected = include_str!("../test.huon");
+
+        assert_eq!(s, expected);
+    }
+
+    #[test]
+    fn test_serialize_struct_with_seq() {
+        let code_info = CodeInfo {
+            test_codes: TestCodes {
+                codes: vec![111.1, 333.3, 555.5],
+                info: "Passwords".to_string(),
+            },
+            name: "General Access".to_string(),
+        };
+
+        let s = to_string(&code_info).unwrap();
+
+        println!("{s}");
+
+        let expected = include_str!("../test_list.huon");
 
         assert_eq!(s, expected);
     }

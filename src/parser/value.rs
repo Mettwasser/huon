@@ -16,6 +16,8 @@ pub enum HuonValue<'a> {
     // Null types
     Null,
 
+    List(Vec<HuonValue<'a>>),
+
     // Composite types
     Object(HashMap<&'a str, HuonValue<'a>>),
 }

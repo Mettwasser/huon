@@ -1,4 +1,4 @@
-use std::collections::hash_map;
+use std::collections::{VecDeque, hash_map};
 
 use crate::{
     parser::{Parser, ValueMap, value::HuonValue},
@@ -28,6 +28,9 @@ impl<'de> Deserializer<'de> for HuonDeserializer<'de> {
             HuonValue::Float(f) => visitor.visit_f64(f),
             HuonValue::Null => visitor.visit_none(),
             HuonValue::Object(map) => visitor.visit_map(MapDeserializer::new(map)),
+            HuonValue::List(list) => visitor.visit_seq(SequenceDeserializer {
+                sequence: VecDeque::from(list),
+            }),
         }
     }
 
@@ -169,6 +172,27 @@ impl<'de> de::MapAccess<'de> for MapDeserializer<'de> {
     }
 }
 
+struct SequenceDeserializer<'de> {
+    sequence: VecDeque<HuonValue<'de>>,
+}
+
+impl<'de> de::SeqAccess<'de> for SequenceDeserializer<'de> {
+    type Error = de::value::Error;
+
+    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        self.sequence
+            .pop_front()
+            .map(|val| {
+                let value_deserializer = HuonDeserializer { value: val };
+                seed.deserialize(value_deserializer)
+            })
+            .transpose()
+    }
+}
+
 #[derive(Debug)]
 pub enum HuonDeserializeError<'de> {
     SerdeError(serde::de::value::Error),
@@ -180,7 +204,7 @@ pub fn from_str<'de, T>(s: &'de str) -> Result<T, HuonDeserializeError<'de>>
 where
     T: Deserialize<'de>,
 {
-    let tokens = Tokenizer::scan(s).map_err(|err| HuonDeserializeError::TokenizerError(err))?;
+    let tokens = Tokenizer::tokenize(s).map_err(|err| HuonDeserializeError::TokenizerError(err))?;
 
     let parsed = Parser::parse(tokens).map_err(|err| HuonDeserializeError::ParserError(err))?;
 
@@ -196,7 +220,10 @@ where
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use crate::test_model::{Job, JobCategory, JobInfo, NewType, PayRate, Person};
+    use crate::{
+        test_list_model::{CodeInfo, TestCodes},
+        test_model::{Job, JobCategory, JobInfo, NewType, PayRate, Person},
+    };
 
     use super::*;
 
@@ -241,5 +268,22 @@ mod tests {
         };
 
         assert_eq!(person, expected_person);
+    }
+
+    #[test]
+    fn test_deserialization_new_list() {
+        let input = include_str!("../test_list.huon").to_owned();
+
+        let code_info: CodeInfo = from_str(&input).expect("Deserialization failed");
+
+        let expected_code_info = CodeInfo {
+            test_codes: TestCodes {
+                codes: vec![111.1, 333.3, 555.5],
+                info: "Passwords".to_string(),
+            },
+            name: "General Access".to_string(),
+        };
+
+        assert_eq!(code_info, expected_code_info);
     }
 }

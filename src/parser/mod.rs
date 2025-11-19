@@ -97,8 +97,13 @@ impl<'a> Parser<'a> {
 
             let value = match self.peek()? {
                 Token::WhiteSpace(1) => {
-                    self.advance()?;
-                    self.parse_value()?
+                    self.advance()?; // consume whitespace
+
+                    if self.peek()? == Token::ListStart {
+                        HuonValue::List(self.parse_list()?)
+                    } else {
+                        self.parse_value()?
+                    }
                 }
 
                 Token::NewLine => {
@@ -134,6 +139,36 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_list(&mut self) -> Result<'a, Vec<HuonValue<'a>>> {
+        let mut list = Vec::new();
+
+        self.advance()?; // consume ListStart
+
+        while let Ok(token) = self.peek() {
+            match token {
+                Token::ListEnd => {
+                    self.advance()?; // consume ListEnd
+                    break;
+                }
+
+                Token::WhiteSpace(_) | Token::NewLine => {
+                    self.advance()?; // consume whitespace
+                }
+
+                Token::Separator => {
+                    self.advance()?; // consume Separator
+                }
+
+                _ => {
+                    let value = self.parse_value()?;
+                    list.push(value);
+                }
+            }
+        }
+
+        Ok(list)
+    }
+
     fn peek(&self) -> Result<'a, Token<'a>> {
         self.input.get(self.cursor).cloned().ok_or(ParserError::Eof)
     }
@@ -145,9 +180,28 @@ impl<'a> Parser<'a> {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub enum ParseError<'a> {
+    ParserError(ParserError<'a>),
+    TokenizerError(#[from] crate::tokenizer::TokenizerError),
+}
+
+impl<'a> From<ParserError<'a>> for ParseError<'a> {
+    fn from(err: ParserError<'a>) -> Self {
+        ParseError::ParserError(err)
+    }
+}
+
+pub fn parse<'a>(input: &'a str) -> std::result::Result<ValueMap<'a>, ParseError<'a>> {
+    let tokens = crate::tokenizer::Tokenizer::tokenize(input)?;
+
+    Ok(Parser::parse(tokens)?)
+}
+
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::tokenizer::Tokenizer};
+    use super::*;
 
     macro_rules! map {
         ( $( $key:expr => $value:expr ),* ) => {
@@ -160,10 +214,48 @@ mod tests {
     }
 
     #[test]
-    fn test_parser() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let tokens = Tokenizer::scan(include_str!("../../test.huon"))?;
+    fn test_parser_list_newline() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let map = parse(
+            "numbers: [
+    -3.5
+    2.5
+    1.1
+]",
+        )?;
 
-        let map = Parser::parse(tokens)?;
+        let expected = map! {
+            "numbers" => HuonValue::List(vec![
+                HuonValue::Float(-3.5),
+                HuonValue::Float(2.5),
+                HuonValue::Float(1.1),
+            ])
+        };
+
+        assert_eq!(map, expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parser_list_spaced() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let map = parse("numbers: [-3.5 2.5 1.1]")?;
+
+        let expected = map! {
+            "numbers" => HuonValue::List(vec![
+                HuonValue::Float(-3.5),
+                HuonValue::Float(2.5),
+                HuonValue::Float(1.1),
+            ])
+        };
+
+        assert_eq!(map, expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parser() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let map = parse(include_str!("../../test.huon"))?;
 
         let expected = map! {
             "name" => HuonValue::String("John"),
@@ -205,9 +297,9 @@ mod tests {
 
     #[test]
     fn fail_int_before_ident() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let tokens = Tokenizer::scan("1job1: \"swe\"")?;
-
-        let err = Parser::parse(tokens).unwrap_err();
+        let ParseError::ParserError(err) = parse("1job1: \"swe\"").unwrap_err() else {
+            unreachable!("Expected ParserError");
+        };
 
         assert_eq!(err, ParserError::InvalidToken(Token::Int(1)));
 
