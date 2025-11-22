@@ -316,4 +316,25 @@ mod tests {
 
         assert_eq!(code_info, expected_code_info);
     }
+
+    #[test]
+    fn test_deserialize_array() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Seq([f64; 3]);
+
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Bla {
+            foo: Seq,
+        }
+
+        let input = "foo: [30.0 32.3 16.9]";
+
+        let bla: Bla = from_str(input, DecoderOptions::default()).expect("failed to deserialize");
+
+        let expected = Bla {
+            foo: Seq([30.0, 32.3, 16.9]),
+        };
+
+        assert_eq!(bla, expected);
+    }
 }
