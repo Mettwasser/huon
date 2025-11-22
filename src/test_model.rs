@@ -1,29 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/*
-name: "John"
-job1:
-    category:
-        name: "IT"
-    info:
-        pay: 4200
-        payrate:
-            iteration: "monthly"
-            date: "Last Friday of every month"
-    name: "Software Engineer"
-age: 32
-job2:
-    category:
-        name: "Security"
-    info:
-        pay: 3700
-        payrate:
-            iteration: "weekly"
-            date: "Every Friday"
-    name: "Bodyguard"
-last_name: "Doe"
-*/
-
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct NewType<'a>(pub &'a str);
 

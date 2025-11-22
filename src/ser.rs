@@ -546,8 +546,8 @@ mod tests {
 
         let expected = indoc! {r#"
             test_codes:
-              codes: [111.1, 333.3, 555.5]
-              info: "Passwords"
+                codes: [111.1, 333.3, 555.5]
+                info: "Passwords"
             name: "General Access""#};
 
         assert_eq!(s, expected);
