@@ -167,7 +167,7 @@ let s = to_string(
     &code_info,
     EncoderOptions {
         indent: 2, // indents to use!
-        list_comma_style: ListCommaStyle::None,
+        list_comma_style: ListCommaStyle::None, // None / Basic / Trailing
     },
 )
 .unwrap();
@@ -176,3 +176,5 @@ let expected = include_str!("input from above").to_owned();
 
 assert_eq!(s, expected);
 ```
+
+More info on [`ListCommaStyle`](./src/lib.rs#L16-L25)
