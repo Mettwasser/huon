@@ -5,6 +5,7 @@
     "Deque",
     "huan",
     "huon",
+    "indoc",
     "newtype",
     "payrate",
     "serde",

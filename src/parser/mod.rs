@@ -1,5 +1,5 @@
 use {
-    crate::tokenizer::token::Token,
+    crate::{DecoderOptions, tokenizer::token::Token},
     std::{cmp::Ordering, collections::HashMap},
     value::HuonValue,
 };
@@ -26,19 +26,22 @@ pub struct Parser<'a> {
     input: Vec<Token<'a>>,
     cursor: usize,
     collapse: usize,
+    options: DecoderOptions,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(input: Vec<Token<'a>>) -> Self {
+    #[must_use]
+    pub fn new(input: Vec<Token<'a>>, options: DecoderOptions) -> Self {
         Self {
             input,
             cursor: 0,
             collapse: 0,
+            options,
         }
     }
 
-    pub fn parse(input: Vec<Token<'a>>) -> Result<'a, ValueMap<'a>> {
-        let mut parser = Self::new(input);
+    pub fn parse(input: Vec<Token<'a>>, options: DecoderOptions) -> Result<'a, ValueMap<'a>> {
+        let mut parser = Self::new(input, options);
         parser.parse_object(0)
     }
 
@@ -47,7 +50,7 @@ impl<'a> Parser<'a> {
     /// Otherwise, it returns false, or an error if the indentation is greater.
     fn check_indentation(&mut self, token: Token<'a>, expected_indent: usize) -> Result<'a, bool> {
         if let Token::WhiteSpace(n) = token {
-            let indent = n / 4;
+            let indent = n / self.options.indent as usize;
             match indent.cmp(&expected_indent) {
                 Ordering::Less => return Ok(false),
                 Ordering::Greater => return Err(ParserError::InvalidToken(token)),
@@ -75,8 +78,11 @@ impl<'a> Parser<'a> {
                 let next_token = self.peek()?;
 
                 match next_token {
-                    Token::WhiteSpace(n) if expected_indent > 0 && (n / 4) < expected_indent => {
-                        self.collapse = expected_indent - (n / 4) - 1;
+                    Token::WhiteSpace(n)
+                        if expected_indent > 0
+                            && (n / self.options.indent as usize) < expected_indent =>
+                    {
+                        self.collapse = expected_indent - (n / self.options.indent as usize) - 1;
                         return Ok(map);
                     }
 
@@ -110,9 +116,11 @@ impl<'a> Parser<'a> {
                     self.advance()?;
 
                     match self.peek()? {
-                        Token::WhiteSpace(n) if (n / 4) > expected_indent => {
+                        Token::WhiteSpace(n)
+                            if (n / self.options.indent as usize) > expected_indent =>
+                        {
                             self.advance()?;
-                            HuonValue::Object(self.parse_object(n / 4)?)
+                            HuonValue::Object(self.parse_object(n / self.options.indent as usize)?)
                         }
                         token => return Err(ParserError::InvalidToken(token)),
                     }
@@ -170,7 +178,7 @@ impl<'a> Parser<'a> {
     }
 
     fn peek(&self) -> Result<'a, Token<'a>> {
-        self.input.get(self.cursor).cloned().ok_or(ParserError::Eof)
+        self.input.get(self.cursor).copied().ok_or(ParserError::Eof)
     }
 
     fn advance(&mut self) -> Result<'a, Token<'a>> {
@@ -193,14 +201,19 @@ impl<'a> From<ParserError<'a>> for ParseError<'a> {
     }
 }
 
-pub fn parse<'a>(input: &'a str) -> std::result::Result<ValueMap<'a>, ParseError<'a>> {
+pub fn parse(
+    input: &str,
+    options: DecoderOptions,
+) -> std::result::Result<ValueMap<'_>, ParseError<'_>> {
     let tokens = crate::tokenizer::Tokenizer::tokenize(input)?;
 
-    Ok(Parser::parse(tokens)?)
+    Ok(Parser::parse(tokens, options)?)
 }
 
 #[cfg(test)]
 mod tests {
+    use indoc::indoc;
+
     use super::*;
 
     macro_rules! map {
@@ -216,11 +229,12 @@ mod tests {
     #[test]
     fn test_parser_list_newline() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let map = parse(
-            "numbers: [
-    -3.5
-    2.5
-    1.1
-]",
+            indoc! {"numbers: [
+                        -3.5
+                        2.5
+                        1.1
+                    ]"},
+            DecoderOptions::default(),
         )?;
 
         let expected = map! {
@@ -238,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_parser_list_spaced() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let map = parse("numbers: [-3.5 2.5 1.1]")?;
+        let map = parse("numbers: [-3.5 2.5 1.1]", DecoderOptions::default())?;
 
         let expected = map! {
             "numbers" => HuonValue::List(vec![
@@ -255,7 +269,7 @@ mod tests {
 
     #[test]
     fn test_parser() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let map = parse(include_str!("../../test.huon"))?;
+        let map = parse(include_str!("../../test.huon"), DecoderOptions::default())?;
 
         let expected = map! {
             "name" => HuonValue::String("John"),
@@ -296,13 +310,13 @@ mod tests {
     }
 
     #[test]
-    fn fail_int_before_ident() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let ParseError::ParserError(err) = parse("1job1: \"swe\"").unwrap_err() else {
+    fn fail_int_before_ident() {
+        let ParseError::ParserError(err) =
+            parse("1job1: \"swe\"", DecoderOptions::default()).unwrap_err()
+        else {
             unreachable!("Expected ParserError");
         };
 
         assert_eq!(err, ParserError::InvalidToken(Token::Int(1)));
-
-        Ok(())
     }
 }

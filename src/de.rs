@@ -1,6 +1,7 @@
 use std::collections::{VecDeque, hash_map};
 
 use crate::{
+    DecoderOptions,
     parser::{Parser, ValueMap, value::HuonValue},
     tokenizer::Tokenizer,
 };
@@ -200,24 +201,28 @@ pub enum HuonDeserializeError<'de> {
     TokenizerError(crate::tokenizer::TokenizerError),
 }
 
-pub fn from_str<'de, T>(s: &'de str) -> Result<T, HuonDeserializeError<'de>>
+pub fn from_str<'de, T>(
+    s: &'de str,
+    options: DecoderOptions,
+) -> Result<T, HuonDeserializeError<'de>>
 where
     T: Deserialize<'de>,
 {
-    let tokens = Tokenizer::tokenize(s).map_err(|err| HuonDeserializeError::TokenizerError(err))?;
+    let tokens = Tokenizer::tokenize(s).map_err(HuonDeserializeError::TokenizerError)?;
 
-    let parsed = Parser::parse(tokens).map_err(|err| HuonDeserializeError::ParserError(err))?;
+    let parsed = Parser::parse(tokens, options).map_err(HuonDeserializeError::ParserError)?;
 
     let value_tree = HuonValue::Object(parsed);
 
     let deserializer = HuonDeserializer { value: value_tree };
 
-    Ok(T::deserialize(deserializer).map_err(|err| HuonDeserializeError::SerdeError(err))?)
+    T::deserialize(deserializer).map_err(HuonDeserializeError::SerdeError)
 }
 
 #[cfg(test)]
 #[allow(unused)]
 mod tests {
+    use indoc::indoc;
     use pretty_assertions::assert_eq;
 
     use crate::{
@@ -231,7 +236,8 @@ mod tests {
     fn test_deserialization() {
         let input = include_str!("../test.huon").to_owned();
 
-        let person: Person = from_str(&input).expect("Deserialization failed");
+        let person: Person =
+            from_str(&input, DecoderOptions::default()).expect("Deserialization failed");
 
         let expected_person = Person {
             name: "John",
@@ -274,7 +280,31 @@ mod tests {
     fn test_deserialization_new_list() {
         let input = include_str!("../test_list.huon").to_owned();
 
-        let code_info: CodeInfo = from_str(&input).expect("Deserialization failed");
+        let code_info: CodeInfo =
+            from_str(&input, DecoderOptions::default()).expect("Deserialization failed");
+
+        let expected_code_info = CodeInfo {
+            test_codes: TestCodes {
+                codes: vec![111.1, 333.3, 555.5],
+                info: "Passwords".to_string(),
+            },
+            name: "General Access".to_string(),
+        };
+
+        assert_eq!(code_info, expected_code_info);
+    }
+
+    #[test]
+    fn test_deserialization_list_indent_2() {
+        let input = indoc! {r#"
+            test_codes:
+              codes: [111.1 333.3 555.5]
+              info: "Passwords"
+            name: "General Access""#}
+        .to_owned();
+
+        let code_info: CodeInfo =
+            from_str(&input, DecoderOptions { indent: 2 }).expect("Deserialization failed");
 
         let expected_code_info = CodeInfo {
             test_codes: TestCodes {

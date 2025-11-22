@@ -31,11 +31,9 @@ pub struct Tokenizer<'a> {
 }
 
 impl<'a> Tokenizer<'a> {
+    #[must_use]
     pub fn new(input: &'a str) -> Self {
-        Self {
-            input,
-            ..Default::default()
-        }
+        Self { input, cursor: 0 }
     }
 }
 
@@ -49,7 +47,7 @@ impl<'a> Tokenizer<'a> {
                 Ok(token) => buffer.push(token),
                 Err(TokenizerError::EOF) => break,
                 Err(err) => return Err(err),
-            };
+            }
         }
 
         Ok(buffer)
@@ -68,7 +66,7 @@ impl<'a> Tokenizer<'a> {
                     .chars()
                     .nth(token_start_idx)
                     .unwrap()
-                    .is_digit(10) =>
+                    .is_ascii_digit() =>
             {
                 let raw_ident = self.read_identifier(token_start_idx)?;
 
@@ -129,7 +127,7 @@ impl<'a> Tokenizer<'a> {
         Ok(&self.input[start_idx..self.cursor])
     }
 
-    /// Reads a [TokenType::Str].
+    /// Reads a [`TokenType::Str`].
     ///
     /// Expects the cursor to be AFTER the initial `"`
     ///
@@ -200,7 +198,7 @@ impl<'a> Tokenizer<'a> {
 }
 
 fn is_valid_identifier_char(char: char) -> bool {
-    (char.is_ascii_alphabetic() || char.is_digit(10)) || ['_'].contains(&char)
+    (char.is_ascii_alphabetic() || char.is_ascii_digit()) || ['_'].contains(&char)
 }
 
 fn parse_keyword(input: &str) -> Option<Token<'_>> {
@@ -254,7 +252,7 @@ mod test {
 
     #[test]
     fn read_number_i64() -> Result<()> {
-        let input = r#"number: 69420"#;
+        let input = "number: 69420";
         let mut lexer = Tokenizer::new(input);
         lexer.cursor = 8;
         let s = lexer.read_number(8)?;
@@ -267,7 +265,7 @@ mod test {
 
     #[test]
     fn read_number_f64() -> Result<()> {
-        let input = r#"number: 69420.187"#;
+        let input = "number: 69420.187";
         let mut lexer = Tokenizer::new(input);
         lexer.cursor = 8;
         let s = lexer.read_number(8)?;
@@ -280,7 +278,7 @@ mod test {
 
     #[test]
     fn read_number_i64_negative() -> Result<()> {
-        let input = r#"number: -69420"#;
+        let input = "number: -69420";
         let mut lexer = Tokenizer::new(input);
         lexer.cursor = 8;
         let s = lexer.read_number(8)?;
@@ -293,7 +291,7 @@ mod test {
 
     #[test]
     fn read_number_f64_negative() -> Result<()> {
-        let input = r#"number: -69420.187"#;
+        let input = "number: -69420.187";
         let mut lexer = Tokenizer::new(input);
         lexer.cursor = 8;
         let s = lexer.read_number(8)?;
@@ -361,7 +359,7 @@ mod test {
 
     #[test]
     fn advance_and_peek() -> Result<()> {
-        let input = r#"abc"#;
+        let input = "abc";
         let mut lexer = Tokenizer::new(input);
 
         assert_eq!(lexer.peek()?, 'a');

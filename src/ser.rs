@@ -2,6 +2,8 @@ use serde::ser::{self, Serialize, SerializeMap, Serializer};
 use std::fmt::Display;
 use std::io;
 
+use crate::{EncoderOptions, ListCommaStyle};
+
 #[derive(Debug, thiserror::Error)]
 pub enum HuonSerializeError {
     #[error(transparent)]
@@ -28,21 +30,28 @@ pub struct HuonSerializer<W: io::Write> {
     is_key: bool,
     is_root: bool,
     key_pending: bool,
+
+    options: EncoderOptions,
 }
 
 impl<W: io::Write> HuonSerializer<W> {
-    pub fn new(writer: W) -> Self {
+    pub fn new(writer: W, options: EncoderOptions) -> Self {
         HuonSerializer {
             writer,
             indent_level: 0,
             is_key: false,
             is_root: true,
             key_pending: false,
+            options,
         }
     }
 
     fn write_indent(&mut self) -> Result<(), HuonSerializeError> {
-        write!(self.writer, "{}", "    ".repeat(self.indent_level))?;
+        write!(
+            self.writer,
+            "{}",
+            " ".repeat(self.indent_level * self.options.indent as usize)
+        )?;
         Ok(())
     }
 
@@ -137,7 +146,7 @@ impl<'a, W: io::Write> Serializer for &'a mut HuonSerializer<W> {
     }
 
     fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
-        self.serialize_f64(v as f64)
+        self.serialize_f64(f64::from(v))
     }
 
     fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
@@ -230,7 +239,11 @@ impl<'a, W: io::Write> Serializer for &'a mut HuonSerializer<W> {
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
         self.write_non_map_value_separator()?;
-        Ok(HuonSeqSerializer::new(self, len))
+        Ok(HuonSeqSerializer::new(
+            self,
+            len,
+            self.options.list_comma_style,
+        ))
     }
 
     fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
@@ -264,11 +277,11 @@ impl<'a, W: io::Write> Serializer for &'a mut HuonSerializer<W> {
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
         self.write_map_value_separator()?;
 
-        if !self.is_root {
+        if self.is_root {
+            self.is_root = false;
+        } else {
             self.writer.write_all(b"\n")?;
             self.indent_level += 1;
-        } else {
-            self.is_root = false;
         }
 
         Ok(Self::SerializeMap::new(self))
@@ -306,7 +319,7 @@ impl<'a, W: io::Write> HuonMapSerializer<'a, W> {
     }
 }
 
-impl<'a, W: io::Write> SerializeMap for HuonMapSerializer<'a, W> {
+impl<W: io::Write> SerializeMap for HuonMapSerializer<'_, W> {
     type Ok = ();
     type Error = HuonSerializeError;
 
@@ -338,7 +351,7 @@ impl<'a, W: io::Write> SerializeMap for HuonMapSerializer<'a, W> {
     }
 }
 
-impl<'a, W: io::Write> ser::SerializeStruct for HuonMapSerializer<'a, W> {
+impl<W: io::Write> ser::SerializeStruct for HuonMapSerializer<'_, W> {
     type Ok = ();
     type Error = HuonSerializeError;
 
@@ -361,15 +374,21 @@ pub struct HuonSeqSerializer<'a, W: io::Write> {
     first: bool,
     length: Option<usize>,
     idx: usize,
+    style: ListCommaStyle,
 }
 
 impl<'a, W: io::Write> HuonSeqSerializer<'a, W> {
-    pub fn new(ser: &'a mut HuonSerializer<W>, length: Option<usize>) -> HuonSeqSerializer<'a, W> {
+    pub fn new(
+        ser: &'a mut HuonSerializer<W>,
+        length: Option<usize>,
+        style: ListCommaStyle,
+    ) -> HuonSeqSerializer<'a, W> {
         HuonSeqSerializer {
             ser,
             first: true,
             length,
             idx: 0,
+            style,
         }
     }
 
@@ -378,7 +397,7 @@ impl<'a, W: io::Write> HuonSeqSerializer<'a, W> {
     }
 }
 
-impl<'a, W: io::Write> ser::SerializeSeq for HuonSeqSerializer<'a, W> {
+impl<W: io::Write> ser::SerializeSeq for HuonSeqSerializer<'_, W> {
     type Ok = ();
     type Error = HuonSerializeError;
 
@@ -390,8 +409,17 @@ impl<'a, W: io::Write> ser::SerializeSeq for HuonSeqSerializer<'a, W> {
 
         value.serialize(&mut *self.ser)?;
 
-        if !self.is_last() {
-            write!(self.ser.writer, ", ")?;
+        match self.style {
+            ListCommaStyle::None if !self.is_last() => write!(self.ser.writer, " ")?,
+            ListCommaStyle::Basic if !self.is_last() => write!(self.ser.writer, ", ")?,
+            ListCommaStyle::Trailing => {
+                if self.is_last() {
+                    write!(self.ser.writer, ", ")?;
+                } else {
+                    write!(self.ser.writer, ",")?;
+                }
+            }
+            _ => (),
         }
 
         self.idx += 1;
@@ -406,7 +434,7 @@ impl<'a, W: io::Write> ser::SerializeSeq for HuonSeqSerializer<'a, W> {
     }
 }
 
-pub fn to_string<T>(value: &T) -> Result<String, HuonSerializeError>
+pub fn to_string<T>(value: &T, options: EncoderOptions) -> Result<String, HuonSerializeError>
 where
     T: ?Sized + Serialize,
 {
@@ -417,6 +445,7 @@ where
         is_key: false,
         is_root: true,
         key_pending: false,
+        options,
     };
 
     value.serialize(&mut serializer)?;
@@ -426,10 +455,12 @@ where
 
 #[cfg(test)]
 mod tests {
+    use indoc::indoc;
     use pretty_assertions::assert_eq;
 
     use crate::{
-        test_list_model::{CodeInfo, TestCodes},
+        ListCommaStyle,
+        test_list_model::CodeInfo,
         test_model::{Job, JobCategory, JobInfo, NewType, PayRate, Person},
     };
 
@@ -471,7 +502,7 @@ mod tests {
             },
         };
 
-        let s = to_string(&expected_person).unwrap();
+        let s = to_string(&expected_person, EncoderOptions::default()).unwrap();
 
         let expected = include_str!("../test.huon");
 
@@ -480,19 +511,68 @@ mod tests {
 
     #[test]
     fn test_serialize_struct_with_seq() {
-        let code_info = CodeInfo {
-            test_codes: TestCodes {
-                codes: vec![111.1, 333.3, 555.5],
-                info: "Passwords".to_string(),
-            },
-            name: "General Access".to_string(),
-        };
+        let code_info = CodeInfo::default();
 
-        let s = to_string(&code_info).unwrap();
+        let s = to_string(
+            &code_info,
+            EncoderOptions {
+                indent: 4,
+                list_comma_style: ListCommaStyle::Basic,
+            },
+        )
+        .unwrap();
 
         println!("{s}");
 
         let expected = include_str!("../test_list.huon");
+
+        assert_eq!(s, expected);
+    }
+
+    #[test]
+    fn test_seq_indent_2() {
+        let code_info = CodeInfo::default();
+
+        let s = to_string(
+            &code_info,
+            EncoderOptions {
+                indent: 2,
+                list_comma_style: ListCommaStyle::Basic,
+            },
+        )
+        .unwrap();
+
+        println!("{s}");
+
+        let expected = indoc! {r#"
+            test_codes:
+              codes: [111.1, 333.3, 555.5]
+              info: "Passwords"
+            name: "General Access""#};
+
+        assert_eq!(s, expected);
+    }
+
+    #[test]
+    fn test_seq_no_comma() {
+        let code_info = CodeInfo::default();
+
+        let s = to_string(
+            &code_info,
+            EncoderOptions {
+                indent: 4,
+                list_comma_style: ListCommaStyle::None,
+            },
+        )
+        .unwrap();
+
+        println!("{s}");
+
+        let expected = indoc! {r#"
+        test_codes:
+            codes: [111.1 333.3 555.5]
+            info: "Passwords"
+        name: "General Access""#};
 
         assert_eq!(s, expected);
     }

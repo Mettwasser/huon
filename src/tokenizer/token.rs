@@ -14,6 +14,7 @@ pub enum Token<'a> {
 }
 
 impl Token<'_> {
+    #[must_use]
     pub fn is_value(&self) -> bool {
         matches!(
             self,
