@@ -8,7 +8,25 @@ The tokenizer is entirely stack allocated, the parser has 1 exception to this: h
 
 # Performance
 
-I am too lazy to benchmark this. Should be pretty fast however, as _most_ things are entirely stack-allocated.
+Benchmarks are included to measure deserialization performance using `criterion`.
+
+The benchmarks are defined in `benches/parsing.rs` and measure the time taken to deserialize:
+
+- `test.huon`: A complex HUON structure representing a `Person` object.
+- `test_list.huon`: A simpler HUON structure representing `CodeInfo`.
+
+While specific numbers can vary by system, the parsing remains efficient due to the design, with most operations being stack-allocated.
+
+## Benchmarking (Deserialization)
+
+The results below were captured on an Intel(R) Core(TM) i7-13700KF powered Linux (CachyOS) machine.
+
+The deserialization of the models ([])
+
+| Benchmark Input File                 | Model                                         | Time       |
+| ------------------------------------ | --------------------------------------------- | ---------- |
+| [`test.huon`](./test.huon)           | [`test_model`](./src/test_model.rs)           | ~24.304 µs |
+| [`test_list.huon`](./test_list.huon) | [`test_list_model`](./src/test_list_model.rs) | ~2.9483 µs |
 
 # serde
 
