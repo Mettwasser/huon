@@ -1,15 +1,13 @@
-use std::collections::{VecDeque, hash_map};
-
 use crate::{
-    DecoderOptions,
-    parser::{Parser, ValueMap, value::HuonValue},
+    parser::{value::HuonValue, Parser, ValueMap},
     tokenizer::Tokenizer,
+    DecoderOptions,
 };
 use serde::{
-    Deserialize, Deserializer,
     de::{self, Visitor},
-    forward_to_deserialize_any,
+    forward_to_deserialize_any, Deserializer,
 };
+use std::collections::{hash_map, VecDeque};
 
 pub struct HuonDeserializer<'de> {
     value: HuonValue<'de>,
@@ -206,11 +204,12 @@ pub fn from_str<'de, T>(
     options: DecoderOptions,
 ) -> Result<T, HuonDeserializeError<'de>>
 where
-    T: Deserialize<'de>,
+    T: serde::Deserialize<'de>,
 {
-    let tokens = Tokenizer::tokenize(s).map_err(HuonDeserializeError::TokenizerError)?;
+    let tokenizer = Tokenizer::new(s);
 
-    let parsed = Parser::parse(tokens, options).map_err(HuonDeserializeError::ParserError)?;
+    let parsed =
+        Parser::parse(tokenizer, options).map_err(HuonDeserializeError::ParserError)?;
 
     let value_tree = HuonValue::Object(parsed);
 
@@ -317,6 +316,7 @@ mod tests {
         assert_eq!(code_info, expected_code_info);
     }
 
+use serde::Deserialize;
     #[test]
     fn test_deserialize_array() {
         #[derive(Debug, Deserialize, PartialEq)]

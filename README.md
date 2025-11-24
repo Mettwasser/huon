@@ -23,8 +23,8 @@ The results below were captured on an Intel(R) Core(TM) i7-13700KF powered Linux
 
 | Benchmark Input File                 | Model                                         | Time       |
 | ------------------------------------ | --------------------------------------------- | ---------- |
-| [`test.huon`](./test.huon)           | [`test_model`](./src/test_model.rs)           | ~24.304 µs |
-| [`test_list.huon`](./test_list.huon) | [`test_list_model`](./src/test_list_model.rs) | ~2.9483 µs |
+| [`test.huon`](./test.huon)           | [`test_model`](./src/test_model.rs)           | ~1.9006 µs |
+| [`test_list.huon`](./test_list.huon) | [`test_list_model`](./src/test_list_model.rs) | ~468.44 ns |
 
 # serde
 

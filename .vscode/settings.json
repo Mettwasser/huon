@@ -8,6 +8,8 @@
     "indoc",
     "newtype",
     "payrate",
+    "peekable",
+    "Peekable",
     "serde",
     "thiserror"
   ]

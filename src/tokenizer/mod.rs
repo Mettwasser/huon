@@ -1,10 +1,12 @@
-pub mod token;
-use std::num::ParseFloatError;
+use std::iter::Peekable;
+use std::num::{ParseFloatError, ParseIntError};
+use std::str::CharIndices;
 
 use token::Token;
 
-#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
-#[error(transparent)]
+pub mod token;
+
+#[derive(Debug, thiserror::Error, Clone, PartialEq)]
 pub enum TokenizerError {
     /// End of file
     #[error("End of file")]
@@ -16,68 +18,48 @@ pub enum TokenizerError {
     #[error("Found an unexpected character: {_0}")]
     UnexpectedCharacter(char),
 
+    #[error("Failed to parse a float: {_0}")]
     ParseFloatError(#[from] ParseFloatError),
+
+    #[error("Failed to parse an int: {_0}")]
+    ParseIntError(#[from] ParseIntError),
 }
 
 type Result<T> = std::result::Result<T, TokenizerError>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone)]
 pub struct Tokenizer<'a> {
-    /// The original input to operate on
     input: &'a str,
-
-    /// The "pointer" to where the lexer is at
-    cursor: usize,
+    char_indices: Peekable<CharIndices<'a>>,
 }
 
 impl<'a> Tokenizer<'a> {
     #[must_use]
     pub fn new(input: &'a str) -> Self {
-        Self { input, cursor: 0 }
+        Self {
+            input,
+            char_indices: input.char_indices().peekable(),
+        }
     }
 }
 
-impl<'a> Tokenizer<'a> {
-    pub fn tokenize(input: &'a str) -> Result<Vec<Token<'a>>> {
-        let mut tokenizer = Self::new(input);
+impl<'a> Iterator for Tokenizer<'a> {
+    type Item = Result<Token<'a>>;
 
-        let mut buffer = Vec::new();
-        loop {
-            match tokenizer.next_token() {
-                Ok(token) => buffer.push(token),
-                Err(TokenizerError::EOF) => break,
-                Err(err) => return Err(err),
-            }
-        }
+    fn next(&mut self) -> Option<Self::Item> {
+        let (token_start_idx, char) = self.char_indices.next()?;
 
-        Ok(buffer)
-    }
-
-    fn next_token(&mut self) -> Result<Token<'a>> {
-        let token_start_idx = self.cursor;
-        match self.advance()? {
+        let token_result = match char {
             '"' => self.read_string(),
 
             char if char.is_ascii_digit() || char == '-' => self.read_number(token_start_idx),
 
-            char if is_valid_identifier_char(char)
-                && !self
-                    .input
-                    .chars()
-                    .nth(token_start_idx)
-                    .unwrap()
-                    .is_ascii_digit() =>
-            {
-                let raw_ident = self.read_identifier(token_start_idx)?;
+            char if is_valid_identifier_char(char) => {
+                let raw_ident = self.read_identifier(token_start_idx);
 
-                match self.peek() {
-                    Ok(':') => {
-                        self.advance()?;
-                        return Ok(Token::Identifier(raw_ident));
-                    }
-                    Err(TokenizerError::EOF) => (),
-                    Err(err) => return Err(err),
-                    _ => (),
+                if let Some((_, ':')) = self.char_indices.peek() {
+                    self.char_indices.next();
+                    return Some(Ok(Token::Identifier(raw_ident)));
                 }
 
                 parse_keyword(raw_ident).ok_or(TokenizerError::UnexpectedCharacter(char))
@@ -91,109 +73,100 @@ impl<'a> Tokenizer<'a> {
 
             '\n' => Ok(Token::NewLine),
 
-            '\r' => match self.peek()? {
-                '\n' => {
-                    self.advance()?;
+            '\r' => match self.char_indices.peek() {
+                Some((_, '\n')) => {
+                    self.char_indices.next();
                     Ok(Token::NewLine)
                 }
-                c => Err(TokenizerError::UnexpectedCharacter(c)),
+                Some((_, c)) => Err(TokenizerError::UnexpectedCharacter(*c)),
+                None => Ok(Token::NewLine),
             },
 
-            ' ' => self.read_whitespace(token_start_idx),
+            ' ' => self.read_whitespace(),
 
             c => Err(TokenizerError::UnexpectedCharacter(c)),
+        };
+
+        Some(token_result)
+    }
+}
+
+impl<'a> Tokenizer<'a> {
+    fn read_identifier(&mut self, start_idx: usize) -> &'a str {
+        loop {
+            match self.char_indices.peek() {
+                Some((_, char)) if is_valid_identifier_char(*char) => {
+                    self.char_indices.next();
+                }
+                Some((end_idx, _)) => return &self.input[start_idx..*end_idx],
+                None => return &self.input[start_idx..],
+            }
         }
     }
 
-    /// Peeks the next char.
-    fn peek(&self) -> Result<char> {
-        self.input
-            .chars()
-            .nth(self.cursor)
-            .ok_or(TokenizerError::EOF)
-    }
-
-    /// Reads the current char, advancing the lexer's position.
-    fn advance(&mut self) -> Result<char> {
-        let next_char = self.input.chars().nth(self.cursor);
-
-        self.cursor += 1;
-        next_char.ok_or(TokenizerError::EOF)
-    }
-
-    fn read_identifier(&mut self, start_idx: usize) -> Result<&'a str> {
-        self.advance_until(|char| !is_valid_identifier_char(char))?;
-
-        Ok(&self.input[start_idx..self.cursor])
-    }
-
-    /// Reads a [`TokenType::Str`].
-    ///
-    /// Expects the cursor to be AFTER the initial `"`
-    ///
-    /// For example:
-    /// ```txt
-    ///     "Some string!"
-    ///      ^
-    ///      Expects cursor to be here (before S)!
-    /// ```
     fn read_string(&mut self) -> Result<Token<'a>> {
-        // Snapshot current pos
-        let start_idx = self.cursor;
+        let start_idx = match self.char_indices.peek() {
+            Some((idx, _)) => *idx,
+            None => return Err(TokenizerError::EOF),
+        };
 
-        self.advance_until(|char| char == '"')?;
-
-        // Skip the trailing `"`
-        self.advance()?;
-
-        Ok(Token::Str(&self.input[start_idx..(self.cursor - 1)]))
+        loop {
+            match self.char_indices.peek() {
+                Some((_, '"')) => {
+                    let (end_idx, _) = self.char_indices.next().unwrap(); // advance past the closing quote
+                    return Ok(Token::Str(&self.input[start_idx..end_idx]));
+                }
+                Some(_) => {
+                    self.char_indices.next();
+                }
+                None => return Err(TokenizerError::EOF),
+            }
+        }
     }
 
     fn read_number(&mut self, start_idx: usize) -> Result<Token<'a>> {
-        if let Ok(char) = self.peek()
-            && char == '-'
-        {
-            self.advance()?;
-        }
+        let mut is_float = false;
 
-        self.advance_until(|char| !char.is_ascii_digit())?;
-
-        if let Ok(char) = self.peek()
-            && char == '.'
-        {
-            self.advance()?; // consume '.'
-            self.advance_until(|char| !char.is_ascii_digit())?; // consume digits after the dot
-
-            Ok(Token::Float(self.input[start_idx..self.cursor].parse()?))
-        } else {
-            Ok(Token::Int(
-                self.input[start_idx..self.cursor].parse().unwrap(),
-            ))
-        }
-    }
-
-    fn read_whitespace(&mut self, start_idx: usize) -> Result<Token<'a>> {
-        self.advance_until(|char| char != ' ')?;
-
-        Ok(Token::WhiteSpace(self.cursor - start_idx))
-    }
-
-    #[inline]
-    fn advance_until<F>(&mut self, guard: F) -> Result<()>
-    where
-        F: Fn(char) -> bool,
-    {
         loop {
-            let char = self.peek();
-
-            if char.is_err() || guard(char.unwrap()) {
-                break;
+            match self.char_indices.peek() {
+                Some((_, char)) if char.is_ascii_digit() => {
+                    self.char_indices.next();
+                }
+                Some((_, '.')) => {
+                    is_float = true;
+                    self.char_indices.next();
+                }
+                Some((end_idx, _)) => {
+                    let num_str = &self.input[start_idx..*end_idx];
+                    return if is_float {
+                        Ok(num_str.parse().map(Token::Float)?)
+                    } else {
+                        Ok(num_str.parse().map(Token::Int)?)
+                    };
+                }
+                None => {
+                    let num_str = &self.input[start_idx..];
+                    return if is_float {
+                        Ok(num_str.parse().map(Token::Float)?)
+                    } else {
+                        Ok(num_str.parse().map(Token::Int)?)
+                    };
+                }
             }
-
-            self.advance()?;
         }
+    }
 
-        Ok(())
+    fn read_whitespace(&mut self) -> Result<Token<'a>> {
+        let mut count = 1;
+        loop {
+            match self.char_indices.peek() {
+                Some((_, ' ')) => {
+                    count += 1;
+                    self.char_indices.next();
+                }
+                _ => return Ok(Token::WhiteSpace(count)),
+            }
+        }
     }
 }
 
@@ -221,22 +194,19 @@ mod test {
     use super::Tokenizer;
 
     #[test]
-    fn read_string() -> Result<()> {
+    fn read_string() -> std::result::Result<(), TokenizerError> {
         let input = r#""Hi""#;
-        let mut lexer = Tokenizer::new(input);
-        lexer.advance()?;
-        let s = lexer.read_string()?;
+        let tokens: Vec<_> = Tokenizer::new(input).collect::<Result<Vec<_>>>()?;
 
-        assert_eq!(s, Token::Str("Hi"));
-        assert_eq!(lexer.advance(), Err(TokenizerError::EOF));
+        assert_eq!(tokens, vec![Token::Str("Hi")]);
 
         Ok(())
     }
 
     #[test]
-    fn identifier() -> Result<()> {
+    fn identifier() -> std::result::Result<(), TokenizerError> {
         let input = "job1: \"swe\"";
-        let tokens = Tokenizer::tokenize(input)?;
+        let tokens: Vec<_> = Tokenizer::new(input).collect::<Result<Vec<_>>>()?;
 
         assert_eq!(
             tokens,
@@ -251,65 +221,81 @@ mod test {
     }
 
     #[test]
-    fn read_number_i64() -> Result<()> {
+    fn read_number_i64() -> std::result::Result<(), TokenizerError> {
         let input = "number: 69420";
-        let mut lexer = Tokenizer::new(input);
-        lexer.cursor = 8;
-        let s = lexer.read_number(8)?;
+        let tokens: Vec<_> = Tokenizer::new(input).collect::<Result<Vec<_>>>()?;
 
-        assert_eq!(s, Token::Int(69420));
-        assert_eq!(lexer.advance(), Err(TokenizerError::EOF));
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("number"),
+                Token::WhiteSpace(1),
+                Token::Int(69420)
+            ]
+        );
 
         Ok(())
     }
 
     #[test]
-    fn read_number_f64() -> Result<()> {
+    fn read_number_f64() -> std::result::Result<(), TokenizerError> {
         let input = "number: 69420.187";
-        let mut lexer = Tokenizer::new(input);
-        lexer.cursor = 8;
-        let s = lexer.read_number(8)?;
+        let tokens: Vec<_> = Tokenizer::new(input).collect::<Result<Vec<_>>>()?;
 
-        assert_eq!(s, Token::Float(69420.187));
-        assert_eq!(lexer.advance(), Err(TokenizerError::EOF));
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("number"),
+                Token::WhiteSpace(1),
+                Token::Float(69420.187)
+            ]
+        );
 
         Ok(())
     }
 
     #[test]
-    fn read_number_i64_negative() -> Result<()> {
+    fn read_number_i64_negative() -> std::result::Result<(), TokenizerError> {
         let input = "number: -69420";
-        let mut lexer = Tokenizer::new(input);
-        lexer.cursor = 8;
-        let s = lexer.read_number(8)?;
+        let tokens: Vec<_> = Tokenizer::new(input).collect::<Result<Vec<_>>>()?;
 
-        assert_eq!(s, Token::Int(-69420));
-        assert_eq!(lexer.advance(), Err(TokenizerError::EOF));
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("number"),
+                Token::WhiteSpace(1),
+                Token::Int(-69420)
+            ]
+        );
 
         Ok(())
     }
 
     #[test]
-    fn read_number_f64_negative() -> Result<()> {
+    fn read_number_f64_negative() -> std::result::Result<(), TokenizerError> {
         let input = "number: -69420.187";
-        let mut lexer = Tokenizer::new(input);
-        lexer.cursor = 8;
-        let s = lexer.read_number(8)?;
+        let tokens: Vec<_> = Tokenizer::new(input).collect::<Result<Vec<_>>>()?;
 
-        assert_eq!(s, Token::Float(-69420.187));
-        assert_eq!(lexer.advance(), Err(TokenizerError::EOF));
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("number"),
+                Token::WhiteSpace(1),
+                Token::Float(-69420.187)
+            ]
+        );
 
         Ok(())
     }
 
     #[test]
-    fn read_list_newline() -> Result<()> {
+    fn read_list_newline() -> std::result::Result<(), TokenizerError> {
         let input = "numbers: [
     -3.5
     2.5
     1.1
 ]";
-        let tokens = Tokenizer::tokenize(input)?;
+        let tokens: Vec<_> = Tokenizer::new(input).collect::<Result<Vec<_>>>()?;
 
         assert_eq!(
             tokens,
@@ -335,9 +321,9 @@ mod test {
     }
 
     #[test]
-    fn read_list_spaced() -> Result<()> {
+    fn read_list_spaced() -> std::result::Result<(), TokenizerError> {
         let input = "numbers: [-3.5 2.5 1.1]";
-        let tokens = Tokenizer::tokenize(input)?;
+        let tokens: Vec<_> = Tokenizer::new(input).collect::<Result<Vec<_>>>()?;
 
         assert_eq!(
             tokens,
@@ -358,24 +344,26 @@ mod test {
     }
 
     #[test]
-    fn advance_and_peek() -> Result<()> {
-        let input = "abc";
-        let mut lexer = Tokenizer::new(input);
+    fn advance_and_peek() -> std::result::Result<(), TokenizerError> {
+        let input = "true false null";
+        let mut tokenizer = Tokenizer::new(input).peekable();
 
-        assert_eq!(lexer.peek()?, 'a');
-        assert_eq!(lexer.cursor, 0);
+        assert_eq!(tokenizer.peek().unwrap().clone()?, Token::Boolean(true));
+        assert_eq!(tokenizer.next().unwrap()?, Token::Boolean(true));
 
-        assert_eq!(lexer.advance()?, 'a');
-        assert_eq!(lexer.peek()?, 'b');
-        assert_eq!(lexer.cursor, 1);
+        assert_eq!(tokenizer.peek().unwrap().clone()?, Token::WhiteSpace(1));
+        assert_eq!(tokenizer.next().unwrap()?, Token::WhiteSpace(1));
 
-        assert_eq!(lexer.advance()?, 'b');
-        assert_eq!(lexer.peek()?, 'c');
-        assert_eq!(lexer.cursor, 2);
+        assert_eq!(tokenizer.peek().unwrap().clone()?, Token::Boolean(false));
+        assert_eq!(tokenizer.next().unwrap()?, Token::Boolean(false));
 
-        assert_eq!(lexer.advance()?, 'c');
-        assert_eq!(lexer.peek(), Err(TokenizerError::EOF));
-        assert_eq!(lexer.cursor, 3);
+        assert_eq!(tokenizer.peek().unwrap().clone()?, Token::WhiteSpace(1));
+        assert_eq!(tokenizer.next().unwrap()?, Token::WhiteSpace(1));
+
+        assert_eq!(tokenizer.peek().unwrap().clone()?, Token::Null);
+        assert_eq!(tokenizer.next().unwrap()?, Token::Null);
+
+        assert!(tokenizer.next().is_none());
 
         Ok(())
     }

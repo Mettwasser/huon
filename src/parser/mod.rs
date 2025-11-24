@@ -1,6 +1,9 @@
 use {
-    crate::{DecoderOptions, tokenizer::token::Token},
-    std::{cmp::Ordering, collections::HashMap},
+    crate::{
+        tokenizer::{token::Token, Tokenizer, TokenizerError},
+        DecoderOptions,
+    },
+    std::{cmp::Ordering, collections::HashMap, iter::Peekable},
     value::HuonValue,
 };
 
@@ -8,7 +11,7 @@ pub mod value;
 
 type Result<'a, T> = std::result::Result<T, ParserError<'a>>;
 
-#[derive(Debug, thiserror::Error, PartialEq, PartialOrd)]
+#[derive(Debug, thiserror::Error, PartialEq)]
 pub enum ParserError<'a> {
     #[error("EOF")]
     Eof,
@@ -18,30 +21,31 @@ pub enum ParserError<'a> {
 
     #[error("Couldn't convert from: {_0:?}")]
     InvalidHuonValue(Token<'a>),
+
+    #[error(transparent)]
+    TokenizerError(#[from] TokenizerError),
 }
 
 pub type ValueMap<'a> = HashMap<&'a str, HuonValue<'a>>;
 
 pub struct Parser<'a> {
-    input: Vec<Token<'a>>,
-    cursor: usize,
+    tokenizer: Peekable<Tokenizer<'a>>,
     collapse: usize,
     options: DecoderOptions,
 }
 
 impl<'a> Parser<'a> {
     #[must_use]
-    pub fn new(input: Vec<Token<'a>>, options: DecoderOptions) -> Self {
+    pub fn new(tokenizer: Tokenizer<'a>, options: DecoderOptions) -> Self {
         Self {
-            input,
-            cursor: 0,
+            tokenizer: tokenizer.peekable(),
             collapse: 0,
             options,
         }
     }
 
-    pub fn parse(input: Vec<Token<'a>>, options: DecoderOptions) -> Result<'a, ValueMap<'a>> {
-        let mut parser = Self::new(input, options);
+    pub fn parse(tokenizer: Tokenizer<'a>, options: DecoderOptions) -> Result<'a, ValueMap<'a>> {
+        let mut parser = Self::new(tokenizer, options);
         parser.parse_object(0)
     }
 
@@ -66,7 +70,7 @@ impl<'a> Parser<'a> {
     fn parse_object(&mut self, expected_indent: usize) -> Result<'a, ValueMap<'a>> {
         let mut map = HashMap::new();
 
-        while let Ok(token) = self.peek() {
+        while let Some(Ok(token)) = self.peek() {
             if self.collapse > 0 {
                 self.collapse -= 1;
                 return Ok(map);
@@ -75,7 +79,10 @@ impl<'a> Parser<'a> {
             if let Token::NewLine = token {
                 self.advance()?;
 
-                let next_token = self.peek()?;
+                let next_token = match self.peek() {
+                    Some(token) => token?,
+                    None => break,
+                };
 
                 match next_token {
                     Token::WhiteSpace(n)
@@ -101,11 +108,11 @@ impl<'a> Parser<'a> {
                 token => return Err(ParserError::InvalidToken(token)),
             };
 
-            let value = match self.peek()? {
+            let value = match self.peek().unwrap()? {
                 Token::WhiteSpace(1) => {
                     self.advance()?; // consume whitespace
 
-                    if self.peek()? == Token::ListStart {
+                    if self.peek().unwrap()? == Token::ListStart {
                         HuonValue::List(self.parse_list()?)
                     } else {
                         self.parse_value()?
@@ -115,7 +122,7 @@ impl<'a> Parser<'a> {
                 Token::NewLine => {
                     self.advance()?;
 
-                    match self.peek()? {
+                    match self.peek().unwrap()? {
                         Token::WhiteSpace(n)
                             if (n / self.options.indent as usize) > expected_indent =>
                         {
@@ -152,7 +159,7 @@ impl<'a> Parser<'a> {
 
         self.advance()?; // consume ListStart
 
-        while let Ok(token) = self.peek() {
+        while let Some(Ok(token)) = self.peek() {
             match token {
                 Token::ListEnd => {
                     self.advance()?; // consume ListEnd
@@ -177,37 +184,22 @@ impl<'a> Parser<'a> {
         Ok(list)
     }
 
-    fn peek(&self) -> Result<'a, Token<'a>> {
-        self.input.get(self.cursor).copied().ok_or(ParserError::Eof)
+    fn peek(&mut self) -> Option<Result<'a, Token<'a>>> {
+        self.tokenizer.peek().map(|res| res.clone().map_err(Into::into))
     }
 
     fn advance(&mut self) -> Result<'a, Token<'a>> {
-        let token = self.peek()?;
-        self.cursor += 1;
-        Ok(token)
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub enum ParseError<'a> {
-    ParserError(ParserError<'a>),
-    TokenizerError(#[from] crate::tokenizer::TokenizerError),
-}
-
-impl<'a> From<ParserError<'a>> for ParseError<'a> {
-    fn from(err: ParserError<'a>) -> Self {
-        ParseError::ParserError(err)
+        self.tokenizer.next().unwrap().map_err(Into::into)
     }
 }
 
 pub fn parse(
     input: &str,
     options: DecoderOptions,
-) -> std::result::Result<ValueMap<'_>, ParseError<'_>> {
-    let tokens = crate::tokenizer::Tokenizer::tokenize(input)?;
+) -> std::result::Result<ValueMap<'_>, ParserError<'_>> {
+    let tokenizer = crate::tokenizer::Tokenizer::new(input);
 
-    Ok(Parser::parse(tokens, options)?)
+    Parser::parse(tokenizer, options)
 }
 
 #[cfg(test)]
@@ -311,11 +303,8 @@ mod tests {
 
     #[test]
     fn fail_int_before_ident() {
-        let ParseError::ParserError(err) =
-            parse("1job1: \"swe\"", DecoderOptions::default()).unwrap_err()
-        else {
-            unreachable!("Expected ParserError");
-        };
+        let err =
+            parse("1job1: \"swe\"", DecoderOptions::default()).unwrap_err();
 
         assert_eq!(err, ParserError::InvalidToken(Token::Int(1)));
     }
