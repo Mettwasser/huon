@@ -21,7 +21,7 @@ While specific numbers can vary by system, the parsing remains efficient due to 
 
 The results below were captured on an Intel(R) Core(TM) i7-13700KF powered Linux (CachyOS) machine.
 
-The deserialization of the models ([])
+The deserialization of the models.
 
 | Benchmark Input File                 | Model                                         | Time       |
 | ------------------------------------ | --------------------------------------------- | ---------- |
